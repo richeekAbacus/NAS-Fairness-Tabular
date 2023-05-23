@@ -26,6 +26,13 @@ class FTTransformerSearch:
         self.fairness_search = fairness_search
 
     @property
+    def get_objectives(self)-> list[str]:
+        if self.fairness_search:
+            return ["rev_acc", "abs_statistical_parity_diff"]
+        else:
+            return ["rev_acc"]
+
+    @property
     def configspace(self) -> ConfigurationSpace:
         
         cs = ConfigurationSpace()
@@ -179,8 +186,8 @@ class FTTransformerSearch:
                                                                      pred_y_val, 
                                                                      data_dict['unprivileged_groups'],
                                                                      data_dict['privileged_groups'])
-            print("Val set: Difference in mean outcomes between unprivileged and \
-                   privileged groups = %f" % val_data_metric.mean_difference())
+            print("Val set: Difference in mean outcomes between unprivileged and privileged groups = {}".\
+                  format(val_data_metric.mean_difference()))
             print("Val set: Statistical Parity Difference = %f" % val_class_metric.statistical_parity_difference())
 
             # test metrics ################################################################
@@ -191,8 +198,8 @@ class FTTransformerSearch:
                                                                        pred_y_test,
                                                                        data_dict['unprivileged_groups'],
                                                                        data_dict['privileged_groups'])
-            print("Test set: Difference in mean outcomes between unprivileged and \
-                   privileged groups = %f" % test_data_metric.mean_difference())
+            print("Test set: Difference in mean outcomes between unprivileged and privileged groups = {}".\
+                  format(test_data_metric.mean_difference()))
             print("Test set: Statistical Parity Difference = %f" % test_class_metric.statistical_parity_difference())
 
         return train_acc, val_acc, test_acc, val_class_metric.statistical_parity_difference(), test_class_metric.statistical_parity_difference()
@@ -201,7 +208,8 @@ class FTTransformerSearch:
     def train(self, config: Configuration, seed: int = 0, budget: int = 25) -> float:
         train_acc, val_acc, test_acc, val_fm, test_fm = \
                 self.create_and_train_model_from_config(config, budget) # fm = fairness metric
-        if not self.fairness_search:
-            return 1 - val_acc
-        else:
-            return {'rev_acc': 1 - val_acc, 'abs_statistical_parity_diff': abs(val_fm)}
+        objectives = {'rev_acc': 1 - val_acc}
+        if self.fairness_search:
+            objectives['abs_statistical_parity_diff'] = abs(val_fm)
+        return objectives
+    
