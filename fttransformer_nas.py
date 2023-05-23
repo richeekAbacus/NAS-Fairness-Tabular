@@ -4,8 +4,7 @@ import rtdl
 import torch
 import torch.nn.functional as F
 
-from utils import train, test
-
+from utils import train, test, get_fairness_metrics
 
 from ConfigSpace import (
     Categorical,
@@ -21,9 +20,10 @@ from ConfigSpace import (
 
 
 class FTTransformerSearch:
-    def __init__(self, args, data_fn) -> None:
+    def __init__(self, args, data_fn, fairness_search=True) -> None:
         self.args = args
         self.data_fn = data_fn
+        self.fairness_search = fairness_search
 
     @property
     def configspace(self) -> ConfigurationSpace:
@@ -165,48 +165,43 @@ class FTTransformerSearch:
         else:
             raise NotImplementedError
 
-        train_loader = data_dict['train_loader']
-        test_loader = data_dict['test_loader']
-
         for epoch in range(int(budget)):
-            train(model, optimizer, train_loader, loss_fn, epoch, 100)
+            train(model, optimizer, data_dict['train_loader'], loss_fn, epoch, 100)
 
-            loss, train_acc, pred_y_train = test(model, train_loader, loss_fn, epoch)
+            loss, train_acc, _ = test(model, data_dict['train_loader'], loss_fn, epoch)
             print('Epoch: {}, Train Loss: {}, Train Accuracy: {}'.format(epoch, loss, train_acc))
 
-            # modified_train_dataset = train_dataset.copy(deepcopy=True)
-            # modified_train_dataset.labels = pred_y_train.cpu().numpy()
-            # metric_test = BinaryLabelDatasetMetric(modified_train_dataset,
-            #                                     unprivileged_groups=unprivileged_groups,
-            #                                     privileged_groups=privileged_groups)
-            # print("Test set: Difference in mean outcomes between unprivileged and privileged groups = %f" % metric_test.mean_difference())
+            # validation metrics ##########################################################
+            loss, val_acc, pred_y_val = test(model, data_dict['val_loader'], loss_fn, epoch)
+            print('Epoch: {}, Val Loss: {}, Val Accuracy: {}'.format(epoch, loss, val_acc))
 
+            val_data_metric, val_class_metric = get_fairness_metrics(data_dict['val_dataset'], 
+                                                                     pred_y_val, 
+                                                                     data_dict['unprivileged_groups'],
+                                                                     data_dict['privileged_groups'])
+            print("Val set: Difference in mean outcomes between unprivileged and \
+                   privileged groups = %f" % val_data_metric.mean_difference())
+            print("Val set: Statistical Parity Difference = %f" % val_class_metric.statistical_parity_difference())
 
-            loss, test_acc, pred_y_test = test(model, test_loader, loss_fn, epoch)
+            # test metrics ################################################################
+            loss, test_acc, pred_y_test = test(model, data_dict['test_loader'], loss_fn, epoch)
             print('Epoch: {}, Test Loss: {}, Test Accuracy: {}'.format(epoch, loss, test_acc))
 
-            # modified_test_dataset = test_dataset.copy(deepcopy=True)
-            # modified_test_dataset.labels = pred_y_test.cpu().numpy()
-            # metric_test = BinaryLabelDatasetMetric(modified_test_dataset,
-            #                                     unprivileged_groups=unprivileged_groups,
-            #                                     privileged_groups=privileged_groups)
-            # print("Test set: Difference in mean outcomes between unprivileged and privileged groups = %f" % metric_test.mean_difference())
+            test_data_metric, test_class_metric = get_fairness_metrics(data_dict['test_dataset'],
+                                                                       pred_y_test,
+                                                                       data_dict['unprivileged_groups'],
+                                                                       data_dict['privileged_groups'])
+            print("Test set: Difference in mean outcomes between unprivileged and \
+                   privileged groups = %f" % test_data_metric.mean_difference())
+            print("Test set: Statistical Parity Difference = %f" % test_class_metric.statistical_parity_difference())
 
-            # classification_metric = ClassificationMetric(test_dataset,
-            #                                             modified_test_dataset,
-            #                                             unprivileged_groups=unprivileged_groups,
-            #                                             privileged_groups=privileged_groups)
-            # print("Test set: Classification accuracy = %f" % classification_metric.accuracy())
-            # print("Test set: Disparate impact = %f" % classification_metric.disparate_impact())
-            # print("Test set: Equal opportunity difference = %f" % classification_metric.equal_opportunity_difference())
-            # print("Test set: Average odds difference = %f" % classification_metric.average_odds_difference())
-            # print("Test set: Theil_index = %f" % classification_metric.theil_index())
-        # make val set
-        # add parity into return
-        return train_acc, test_acc
+        return train_acc, val_acc, test_acc, val_class_metric.statistical_parity_difference(), test_class_metric.statistical_parity_difference()
 
 
     def train(self, config: Configuration, seed: int = 0, budget: int = 25) -> float:
-        train_score, test_score = self.create_and_train_model_from_config(config, budget)
-        return 1 - test_score
-    
+        train_acc, val_acc, test_acc, val_fm, test_fm = \
+                self.create_and_train_model_from_config(config, budget) # fm = fairness metric
+        if not self.fairness_search:
+            return 1 - val_acc
+        else:
+            return {'rev_acc': 1 - val_acc, 'abs_statistical_parity_diff': abs(val_fm)}

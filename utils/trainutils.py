@@ -1,7 +1,5 @@
 import torch
 
-import numpy as np
-
 def train(model, optimizer, train_loader, loss_fn, epoch, report_freq=100):
     model.train(True)
     totalcorrect = 0

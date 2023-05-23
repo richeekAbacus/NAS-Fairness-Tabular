@@ -1,19 +1,13 @@
 from __future__ import annotations
 
-import rtdl
+import torch
 import argparse
 
-import torch
-import torch.nn.functional as F
-
-from aif360.metrics import BinaryLabelDatasetMetric, ClassificationMetric
-
-from smac import MultiFidelityFacade as MFFacade
 from smac import Scenario
 from smac.facade import AbstractFacade
+from smac import MultiFidelityFacade as MFFacade
 from smac.intensifier.hyperband import Hyperband
 
-from utils import train, test
 from dataloaders import get_adult_dataloaders
 from fttransformer_nas import FTTransformerSearch
 
@@ -23,6 +17,9 @@ parser.add_argument('--dataset', type=str, default='adult')
 parser.add_argument('--train_bs', type=int, default=64)
 parser.add_argument('--test_bs', type=int, default=64)
 parser.add_argument('--model', type=str, default='FTTransformer')
+parser.add_argument('--multi_objective', action='store_true',
+                    help="whether to use multi-objective optimization \
+                        -> joint optimization of both accuracy and fairness")
 parser.add_argument('--use_advanced_num_embeddings', action='store_true')
 parser.add_argument('--use_mlp', action='store_true')
 parser.add_argument('--use_intersample', action='store_true')
@@ -45,10 +42,10 @@ DATA_FN_MAP = {
     'adult': get_adult_dataloaders
 }
 
-
 if __name__ == "__main__":
     if args.model == 'FTTransformer':
-        model_search = FTTransformerSearch(args, DATA_FN_MAP[args.dataset])
+        model_search = FTTransformerSearch(args, DATA_FN_MAP[args.dataset],
+                                           fairness_search=args.multi_objective)
 
     facades: list[AbstractFacade] = []
     
