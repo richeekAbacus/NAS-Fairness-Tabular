@@ -1,102 +1,100 @@
+from __future__ import annotations
+
 import rtdl
 import argparse
 
 import torch
 import torch.nn.functional as F
 
-from sklearn.preprocessing import MaxAbsScaler
+from aif360.metrics import BinaryLabelDatasetMetric, ClassificationMetric
 
-from aif360.metrics import BinaryLabelDatasetMetric
+from smac import MultiFidelityFacade as MFFacade
+from smac import Scenario
+from smac.facade import AbstractFacade
+from smac.intensifier.hyperband import Hyperband
 
-from dataloaders import load_adult_data, get_dataloaders
 from utils import train, test
+from dataloaders import get_adult_dataloaders
+from fttransformer_nas import FTTransformerSearch
+
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--dataset', type=str, default='adult')
 parser.add_argument('--train_bs', type=int, default=64)
 parser.add_argument('--test_bs', type=int, default=64)
 parser.add_argument('--model', type=str, default='FTTransformer')
-parser.add_argument('--epochs', type=int, default=10)
+parser.add_argument('--use_advanced_num_embeddings', action='store_true')
+parser.add_argument('--use_mlp', action='store_true')
+parser.add_argument('--use_intersample', action='store_true')
+parser.add_argument('--use_long_ffn', action='store_true')
+parser.add_argument('--run_name', type=str, default='test')
+parser.add_argument('--output_dir', type=str, default='results/')
+parser.add_argument('--wall_time_limit', type=int, default=3600, help="in seconds")
+parser.add_argument('--n_trials', type=int, default=15)
+parser.add_argument('--initial_n_configs', type=int, default=5,
+                    help="number of initial random configs to run")
+parser.add_argument('--min_budget', type=int, default=1)
+parser.add_argument('--max_budget', type=int, default=10)
+parser.add_argument('--eval_budget', type=int, default=10)
+parser.add_argument('--seed', type=int, default=42)
 args = parser.parse_args()
 
 #! TODO: Write a new dataloader for the adult dataset. This one drops a lot of columns!
 
-# print out some labels, names, etc.
-# print(dataset_orig_train.features.shape)
-# print(dataset_orig_train.favorable_label, dataset_orig_train.unfavorable_label)
-# print(dataset_orig_train.protected_attribute_names)
-# print(dataset_orig_train.privileged_protected_attributes, 
-#       dataset_orig_train.unprivileged_protected_attributes)
-# print(dataset_orig_train.feature_names)
-# print(dataset_orig_train.features[:5])
-
-
-def data_adult(train_bs=64, test_bs=64):
-    TRAIN_BS = train_bs
-    TEST_BS = test_bs
-    data_orig_train, data_orig_test, privileged_groups, unprivileged_groups = load_adult_data()
-    preproc = MaxAbsScaler()
-    data_orig_train.features = preproc.fit_transform(data_orig_train.features)
-    data_orig_test.features = preproc.fit_transform(data_orig_test.features)
-    train_loader, test_loader = get_dataloaders(data_orig_train, data_orig_test,
-                                                train_bs=TRAIN_BS, test_bs=TEST_BS)
-    return train_loader, test_loader, privileged_groups, unprivileged_groups
-
 DATA_FN_MAP = {
-    'adult': data_adult
+    'adult': get_adult_dataloaders
 }
-BIN_CLASS = {'adult'} # datasets which are binary classification tasks
 
-if __name__ == '__main__':
-    train_bs, test_bs = args.train_bs, args.test_bs
-    train_loader, test_loader, privileged_groups, unprivileged_groups = \
-        DATA_FN_MAP[args.dataset](train_bs, test_bs)
 
-    num_features = train_loader.dataset[0][0].shape[0]
-
+if __name__ == "__main__":
     if args.model == 'FTTransformer':
-        model = rtdl.FTTransformer.make_default(
-            n_num_features=num_features,
-            cat_cardinalities=None,
-            last_layer_query_idx=[-1],
-            d_out=1
-        )
-    else:
-        raise NotImplementedError
-    model.to('cuda')
+        model_search = FTTransformerSearch(args, DATA_FN_MAP[args.dataset])
 
-    if args.model == 'FTTransformer':
-        optimizer = model.make_default_optimizer()
-    else:
-        raise NotImplementedError
+    facades: list[AbstractFacade] = []
+    
+    print('Running NAS on %d GPUs'%torch.cuda.device_count())
+    
+    scenario = Scenario(
+        model_search.configspace,
+        name=args.run_name,
+        output_directory=args.output_dir,
+        walltime_limit=args.wall_time_limit,  # After n seconds, we stop the hyperparameter optimization
+        n_trials=args.n_trials,  # Evaluate max n different trials
+        min_budget=args.min_budget,  # Train the model using a architecture configuration for at least n epochs
+        max_budget=args.max_budget,  # Train the model using a architecture configuration for at most n epochs
+        seed=args.seed,
+        n_workers=torch.cuda.device_count(),
+    )
 
-    if args.dataset in BIN_CLASS:
-        loss_fn = F.binary_cross_entropy_with_logits
+    # We want to run n random configurations before starting the optimization.
+    initial_design = MFFacade.get_initial_design(scenario, n_configs=args.initial_n_configs)
 
-    for epoch in range(args.epochs):
-        model = train(model, optimizer, train_loader, loss_fn, epoch, 100)
-        _, _, pred_y = test(model, test_loader, loss_fn, epoch)
+    intensifier = Hyperband(scenario, incumbent_selection="highest_budget") # SuccessiveHalving can be used
 
+    smac = MFFacade(
+        scenario,
+        model_search.train,
+        initial_design=initial_design,
+        intensifier=intensifier,
+        overwrite=True,
+    )
 
-# # Metric for the original dataset
-# metric_orig_train = BinaryLabelDatasetMetric(dataset_orig_train, 
-#                                              unprivileged_groups=unprivileged_groups,
-#                                              privileged_groups=privileged_groups)
-# print("Train set: Difference in mean outcomes between unprivileged and privileged groups = %f" % metric_orig_train.mean_difference())
-# metric_orig_test = BinaryLabelDatasetMetric(dataset_orig_test, 
-#                                              unprivileged_groups=unprivileged_groups,
-#                                              privileged_groups=privileged_groups)
-# print("Test set: Difference in mean outcomes between unprivileged and privileged groups = %f" % metric_orig_test.mean_difference())
+    incumbent = smac.optimize()
 
+    print("\nBest found configuration: %s" % (incumbent))
 
-# min_max_scaler = MaxAbsScaler()
-# dataset_orig_train.features = min_max_scaler.fit_transform(dataset_orig_train.features)
-# dataset_orig_test.features = min_max_scaler.transform(dataset_orig_test.features)
-# metric_scaled_train = BinaryLabelDatasetMetric(dataset_orig_train, 
-#                              unprivileged_groups=unprivileged_groups,
-#                              privileged_groups=privileged_groups)
-# print("Train set: Difference in mean outcomes between unprivileged and privileged groups = %f" % metric_scaled_train.mean_difference())
-# metric_scaled_test = BinaryLabelDatasetMetric(dataset_orig_test, 
-#                              unprivileged_groups=unprivileged_groups,
-#                              privileged_groups=privileged_groups)
-# print("Test set: Difference in mean outcomes between unprivileged and privileged groups = %f" % metric_scaled_test.mean_difference())
+    default_config = model_search.configspace.get_default_configuration()
+    default_train_score, default_test_score = model_search.create_and_train_model_from_config(config=default_config, budget=args.eval_budget)
+    print(f"\nDefault train score: {default_train_score}")
+    print(f"Default test score: {default_test_score}")
+    
+    incumbent_train_score, incumbent_test_score = model_search.create_and_train_model_from_config(config=incumbent, budget=args.eval_budget)
+    print(f"\nIncumbent train score: {incumbent_train_score}")
+    print(f"Incumbent test score: {incumbent_test_score}")
+    
+    print("\nSelected Model")
+    print(incumbent)
+
+    facades.append(smac)
+
+    # plot_trajectory(facades, args.output_directory, args.seed, args.name)

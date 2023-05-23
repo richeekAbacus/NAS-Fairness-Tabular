@@ -19,8 +19,6 @@ def train(model, optimizer, train_loader, loss_fn, epoch, report_freq=100):
         if iteration % report_freq == 0:
             print('Epoch: {}, Iteration: {}, Loss: {}, Accuracy: {}'.format(epoch, iteration, 
                                                             loss.item(), correct / len(y)))
-    print('Epoch: {}, Total Train Accuracy: {}'.format(epoch, totalcorrect / len(train_loader.dataset)))
-    return model
 
 
 def test(model, test_loader, loss_fn, epoch):
@@ -45,8 +43,6 @@ def test(model, test_loader, loss_fn, epoch):
 
     pred_y = torch.cat(pred_y, dim=0)
     pred_y = torch.round(torch.sigmoid(pred_y))
-
-    print('Epoch: {}, Loss: {}, Accuracy: {}'.format(epoch, loss, accuracy))
 
     return loss, accuracy, pred_y
 
