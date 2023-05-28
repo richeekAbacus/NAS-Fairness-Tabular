@@ -4,7 +4,7 @@ import rtdl
 import torch
 import torch.nn.functional as F
 
-from utils import train, test, get_fairness_metrics
+from utils import train, test, get_fairness_metrics, get_fairness_obj, print_all_metrics
 
 from ConfigSpace import (
     Categorical,
@@ -20,15 +20,16 @@ from ConfigSpace import (
 
 
 class FTTransformerSearch:
-    def __init__(self, args, data_fn, fairness_search=True) -> None:
+    def __init__(self, args, data_fn, fairness_metric=None) -> None:
         self.args = args
         self.data_fn = data_fn
-        self.fairness_search = fairness_search
+        self.fairness_metric = fairness_metric
+        self.fairness_obj_name = self.fairness_metric + "_obj"
 
     @property
     def get_objectives(self)-> list[str]:
-        if self.fairness_search:
-            return ["rev_acc", "abs_statistical_parity_diff"]
+        if self.fairness_metric is not None:
+            return ["rev_acc", self.fairness_obj_name] # both need to be minimized
         else:
             return ["rev_acc"]
 
@@ -179,6 +180,7 @@ class FTTransformerSearch:
             print('Epoch: {}, Train Loss: {}, Train Accuracy: {}'.format(epoch, loss, train_acc))
 
             # validation metrics ##########################################################
+            print("#"*30)
             loss, val_acc, pred_y_val = test(model, data_dict['val_loader'], loss_fn, epoch)
             print('Epoch: {}, Val Loss: {}, Val Accuracy: {}'.format(epoch, loss, val_acc))
 
@@ -188,9 +190,12 @@ class FTTransformerSearch:
                                                                      data_dict['privileged_groups'])
             print("Val set: Difference in mean outcomes between unprivileged and privileged groups = {}".\
                   format(val_data_metric.mean_difference()))
-            print("Val set: Statistical Parity Difference = %f" % val_class_metric.statistical_parity_difference())
+            print("VALIDATION SET METRICS: ")
+            print_all_metrics(val_class_metric)
+            print("#"*30)
 
             # test metrics ################################################################
+            print("#"*30)
             loss, test_acc, pred_y_test = test(model, data_dict['test_loader'], loss_fn, epoch)
             print('Epoch: {}, Test Loss: {}, Test Accuracy: {}'.format(epoch, loss, test_acc))
 
@@ -200,16 +205,20 @@ class FTTransformerSearch:
                                                                        data_dict['privileged_groups'])
             print("Test set: Difference in mean outcomes between unprivileged and privileged groups = {}".\
                   format(test_data_metric.mean_difference()))
-            print("Test set: Statistical Parity Difference = %f" % test_class_metric.statistical_parity_difference())
+            print("TEST SET METRICS: ")
+            print_all_metrics(test_class_metric)
+            print("#"*30)
 
-        return train_acc, val_acc, test_acc, val_class_metric.statistical_parity_difference(), test_class_metric.statistical_parity_difference()
+        return train_acc, val_acc, test_acc,\
+               get_fairness_obj(val_class_metric, self.fairness_metric),\
+               get_fairness_obj(test_class_metric, self.fairness_metric)
 
 
     def train(self, config: Configuration, seed: int = 0, budget: int = 25) -> float:
-        train_acc, val_acc, test_acc, val_fm, test_fm = \
+        train_acc, val_acc, test_acc, val_fobj, test_fobj = \
                 self.create_and_train_model_from_config(config, budget) # fm = fairness metric
         objectives = {'rev_acc': 1 - val_acc}
-        if self.fairness_search:
-            objectives['abs_statistical_parity_diff'] = abs(val_fm)
+        if self.fairness_metric is not None:
+            objectives[self.fairness_obj_name] = val_fobj
         return objectives
     
