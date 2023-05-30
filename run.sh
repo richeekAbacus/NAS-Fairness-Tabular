@@ -14,7 +14,7 @@ python3 train.py \
     --run_name $run_name \
     --output_dir results/ \
     --wall_time_limit 1000000 \
-    --n_trials 200 \
+    --n_trials 130 \
     --initial_n_configs 10 \
     --min_budget 2.5 \
     --max_budget 10 \

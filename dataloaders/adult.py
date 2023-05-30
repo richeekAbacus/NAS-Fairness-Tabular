@@ -4,9 +4,12 @@ from aif360.algorithms.preprocessing.optim_preproc_helpers.data_preproc_function
 from .dataloader import get_dataloaders
 
 
-def get_adult_dataloaders(train_bs=64, test_bs=64):
-    privileged_groups = [{'sex': 1, 'race': 1}]
-    unprivileged_groups = [{'sex': 0, 'race': 0}]
+def get_adult_dataloaders(train_bs=64, test_bs=64, privilege_mode='sex'):
+    if privilege_mode == 'sex':
+        privileged_groups, unprivileged_groups = [{'sex': 1}], [{'sex': 0}]
+    elif privilege_mode == 'race':
+        privileged_groups, unprivileged_groups = [{'race': 1}], [{'race': 0}]
+
     dataset_orig = load_preproc_data_adult()
     data_orig_train, data_orig_val = dataset_orig.split([0.65], shuffle=True)
     data_orig_val, data_orig_test = data_orig_val.split([0.43], shuffle=True) # 0.43 * 0.35 = 0.15

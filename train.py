@@ -17,6 +17,7 @@ from fttransformer_nas import FTTransformerSearch
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--dataset', type=str, default='adult')
+parser.add_argument('--privilege_mode', type=str, default='sex')
 parser.add_argument('--train_bs', type=int, default=64)
 parser.add_argument('--test_bs', type=int, default=64)
 parser.add_argument('--model', type=str, default='FTTransformer')

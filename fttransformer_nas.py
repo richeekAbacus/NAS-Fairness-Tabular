@@ -140,7 +140,8 @@ class FTTransformerSearch:
         print("Budget:", budget)
         print("#"*50)
 
-        data_dict = self.data_fn(config["train_batch_size"], config["test_batch_size"])
+        data_dict = self.data_fn(config["train_batch_size"], config["test_batch_size"],
+                                 privilege_mode=self.args.privilege_mode)
 
         transformer_config = rtdl.FTTransformer.get_baseline_transformer_subconfig()
         transformer_config["n_blocks"] = config["n_blocks"]
