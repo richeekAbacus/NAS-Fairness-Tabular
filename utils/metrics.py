@@ -1,4 +1,3 @@
-import math
 from aif360.metrics import BinaryLabelDatasetMetric, ClassificationMetric
 
 def get_fairness_metrics(dataset, pred_y, unprivileged_groups, privileged_groups,
