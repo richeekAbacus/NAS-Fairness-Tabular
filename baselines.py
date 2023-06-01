@@ -1,6 +1,7 @@
 from aif360.algorithms.preprocessing import DisparateImpactRemover, Reweighing, LFR, OptimPreproc
 from aif360.algorithms.inprocessing import (AdversarialDebiasing, GerryFairClassifier,
-                                            MetaFairClassifier, PrejudiceRemover)
+                                            MetaFairClassifier, PrejudiceRemover,
+                                            ExponentiatedGradientReduction, GridSearchReduction)
 
 from aif360.metrics import BinaryLabelDatasetMetric, ClassificationMetric
 
@@ -17,8 +18,6 @@ import tensorflow.compat.v1 as tf
 tf.disable_eager_execution()
 tf.set_random_seed(42)
 
-from dataloaders import get_adult_dataloaders
-
 
 parser = argparse.ArgumentParser(description='Run debiasing on Adult dataset')
 parser.add_argument("--dataset", type=str, default="adult",
@@ -31,7 +30,9 @@ parser.add_argument("--debiaser", type=str, default="adversarial_debiasing",
                              "adversarial_debiasing",
                              "gerryfair",
                              "metafair",
-                             "prejudice_remover"],
+                             "prejudice_remover",
+                             "exponentiated_gradient_reduction",
+                             "grid_search_reduction"],
                     help="debiasing algorithm to use")
 parser.add_argument("--privilege_mode", type=str, default='sex',
                     help="privileged group for the dataset")
@@ -39,7 +40,8 @@ args = parser.parse_args()
 
 
 preprocessing = {"disparate_impact_remover", "reweighing", "lfr", "optim_proc"}
-inprocessing = {"adversarial_debiasing", "gerryfair", "metafair", "prejudice_remover"}
+inprocessing = {"adversarial_debiasing", "gerryfair", "metafair", "prejudice_remover",
+                "exponentiated_gradient_reduction", "grid_search_reduction"}
 
 
 def main():
@@ -69,11 +71,6 @@ def main():
                                                 privileged_groups=privileged_groups)
     print("Train set: Difference in mean outcomes between unprivileged and privileged groups = %f" % metric_orig_train.mean_difference())
     print("Train set: Initial disparate impact in source dataset = %f" % metric_orig_train.disparate_impact())
-    # metric_orig_val = BinaryLabelDatasetMetric(val_dataset,
-    #                                         unprivileged_groups=unprivileged_groups,
-    #                                         privileged_groups=privileged_groups)
-    # print("Val set: Difference in mean outcomes between unprivileged and privileged groups = %f" % metric_orig_val.mean_difference())
-    # print("Val set: Initial disparate impact in source dataset = %f" % metric_orig_val.disparate_impact())
     metric_orig_test = BinaryLabelDatasetMetric(test_dataset, 
                                                 unprivileged_groups=unprivileged_groups,
                                                 privileged_groups=privileged_groups)
@@ -106,7 +103,6 @@ def main():
         elif args.debiaser == "disparate_impact_remover":
             debias_model = DisparateImpactRemover(repair_level=1.0)
             train_repd = debias_model.fit_transform(train_dataset)
-            # val_repd = debias_model.fit_transform(val_dataset)
             test_repd = debias_model.fit_transform(test_dataset)
 
             metrics_train_dataset = BinaryLabelDatasetMetric(train_repd,
@@ -171,8 +167,6 @@ def main():
                                     scope_name='debiased_classifier',
                                     debias=True, sess=sess)
             debias_model.fit(train_dataset)
-            dataset_debiasing_train = debias_model.predict(train_dataset)
-            # dataset_debiasing_val = debias_model.predict(val_dataset)
             dataset_debiasing_test = debias_model.predict(test_dataset)
 
         elif args.debiaser == "gerryfair":
@@ -182,7 +176,6 @@ def main():
                                                predictor=LogisticRegression(class_weight='balanced',
                                                                             solver='liblinear'))
             debias_model.fit(train_dataset, early_termination=True)
-            dataset_debiasing_train = debias_model.predict(train_dataset)
             dataset_debiasing_test = debias_model.predict(test_dataset)
         
         elif args.debiaser == "metafair":
@@ -193,7 +186,22 @@ def main():
         elif args.debiaser == "prejudice_remover":
             debias_model = PrejudiceRemover(eta=1.0, sensitive_attr=args.privilege_mode)
             debias_model.fit(train_dataset)
-            
+            dataset_debiasing_test = debias_model.predict(test_dataset)
+        
+        elif args.debiaser == "exponentiated_gradient_reduction":
+            estimator = LogisticRegression(solver='lbfgs', max_iter=1000)
+            debias_model = ExponentiatedGradientReduction(estimator=estimator, 
+                                                          constraints="EqualizedOdds",
+                                                          drop_prot_attr=False)
+            debias_model.fit(train_dataset)
+            dataset_debiasing_test = debias_model.predict(test_dataset)
+
+        elif args.debiaser == "grid_search_reduction":
+            estimator = LogisticRegression(solver='liblinear', random_state=1234)
+            debias_model = GridSearchReduction(estimator=estimator, constraints="EqualizedOdds",
+                                               prot_attr=args.privilege_mode, grid_size=20,
+                                               grid_limit=30, drop_prot_attr=False)
+            debias_model.fit(train_dataset)
             dataset_debiasing_test = debias_model.predict(test_dataset)
 
             
