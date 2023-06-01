@@ -2,6 +2,8 @@ from aif360.algorithms.preprocessing import DisparateImpactRemover, Reweighing, 
 from aif360.algorithms.inprocessing import (AdversarialDebiasing, GerryFairClassifier,
                                             MetaFairClassifier, PrejudiceRemover,
                                             ExponentiatedGradientReduction, GridSearchReduction)
+from aif360.algorithms.postprocessing import (CalibratedEqOddsPostprocessing, EqOddsPostprocessing,
+                                              RejectOptionClassification)
 
 from aif360.metrics import BinaryLabelDatasetMetric, ClassificationMetric
 
@@ -12,7 +14,9 @@ from aif360.datasets import AdultDataset
 
 import argparse
 import numpy as np
+
 from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
 
 import tensorflow.compat.v1 as tf
 tf.disable_eager_execution()
@@ -32,7 +36,10 @@ parser.add_argument("--debiaser", type=str, default="adversarial_debiasing",
                              "metafair",
                              "prejudice_remover",
                              "exponentiated_gradient_reduction",
-                             "grid_search_reduction"],
+                             "grid_search_reduction",
+                             "calibrated_eq_odds",
+                             "eq_odds",
+                             "reject_option_classification"],
                     help="debiasing algorithm to use")
 parser.add_argument("--privilege_mode", type=str, default='sex',
                     help="privileged group for the dataset")
@@ -42,15 +49,16 @@ args = parser.parse_args()
 preprocessing = {"disparate_impact_remover", "reweighing", "lfr", "optim_proc"}
 inprocessing = {"adversarial_debiasing", "gerryfair", "metafair", "prejudice_remover",
                 "exponentiated_gradient_reduction", "grid_search_reduction"}
-
+postprocessing = {"calibrated_eq_odds", "eq_odds", "reject_option_classification"}
 
 def main():
-    protected = 'sex'
-    ad = AdultDataset(protected_attribute_names=[protected],
+    ad = AdultDataset(protected_attribute_names=[args.privilege_mode],
                         privileged_classes=[['Male']], categorical_features=[],
                         features_to_keep=['age', 'education-num', 'capital-gain',
                                         'capital-loss', 'hours-per-week'])
-    test_dataset, train_dataset = ad.split([16281], shuffle=False)
+
+    train_dataset, val_dataset = ad.split([0.65], shuffle=True)
+    val_dataset, test_dataset = val_dataset.split([0.43], shuffle=True) # 0.43 * 0.35 = 0.15
 
     # train_dataset = data_dict['train_dataset']
     # val_dataset = data_dict['val_dataset']
@@ -203,6 +211,65 @@ def main():
                                                grid_limit=30, drop_prot_attr=False)
             debias_model.fit(train_dataset)
             dataset_debiasing_test = debias_model.predict(test_dataset)
+
+    elif args.debiaser in postprocessing:
+        scale_orig = StandardScaler()
+        X_train = scale_orig.fit_transform(train_dataset.features)
+        y_train = train_dataset.labels.ravel()
+        lmod = LogisticRegression()
+        lmod.fit(X_train, y_train)
+
+        fav_idx = np.where(lmod.classes_ == train_dataset.favorable_label)[0][0]
+
+        # Prediction probs for validation and testing data
+        X_valid = scale_orig.transform(val_dataset.features)
+        y_valid_pred_prob = lmod.predict_proba(X_valid)[:,fav_idx]
+
+        X_test = scale_orig.transform(test_dataset.features)
+        y_test_pred_prob = lmod.predict_proba(X_test)[:,fav_idx]
+
+        # Placeholder for predicted and transformed datasets
+        val_pred = val_dataset.copy(deepcopy=True)
+        test_pred = test_dataset.copy(deepcopy=True)
+
+        class_thresh = 0.5
+        val_pred.scores = y_valid_pred_prob.reshape(-1,1)
+        test_pred.scores = y_test_pred_prob.reshape(-1,1)
+
+        y_valid_pred = np.zeros_like(val_pred.labels)
+        y_valid_pred[y_valid_pred_prob >= class_thresh] = val_pred.favorable_label
+        y_valid_pred[~(y_valid_pred_prob >= class_thresh)] = val_pred.unfavorable_label
+        val_pred.labels = y_valid_pred
+            
+        y_test_pred = np.zeros_like(test_pred.labels)
+        y_test_pred[y_test_pred_prob >= class_thresh] = test_pred.favorable_label
+        y_test_pred[~(y_test_pred_prob >= class_thresh)] = test_pred.unfavorable_label
+        test_pred.labels = y_test_pred
+
+        if args.debiaser == "calibrated_eq_odds":
+            debias_model = CalibratedEqOddsPostprocessing(privileged_groups=privileged_groups,
+                                                 unprivileged_groups=unprivileged_groups,
+                                                 cost_constraint='fnr',
+                                                 seed=1234)
+            debias_model = debias_model.fit(val_dataset, val_pred)
+            dataset_debiasing_test = debias_model.predict(test_pred)
+        
+        elif args.debiaser == "eq_odds":
+            debias_model = EqOddsPostprocessing(privileged_groups=privileged_groups,
+                                                unprivileged_groups=unprivileged_groups,
+                                                seed=1234)
+            debias_model = debias_model.fit(val_dataset, val_pred)
+            dataset_debiasing_test = debias_model.predict(test_pred)
+
+        elif args.debiaser == "reject_option_classification":
+            debias_model = RejectOptionClassification(privileged_groups=privileged_groups,
+                                                      unprivileged_groups=unprivileged_groups,
+                                                      low_class_thresh=0.01, high_class_thresh=0.99,
+                                                      num_class_thresh=100, num_ROC_margin=50,
+                                                      metric_name="Statistical parity difference",
+                                                      metric_lb=-0.05, metric_ub=0.05)
+            debias_model = debias_model.fit(val_dataset, val_pred)
+            dataset_debiasing_test = debias_model.predict(test_pred)
 
             
     # Metric for the debiased dataset #################################################################
