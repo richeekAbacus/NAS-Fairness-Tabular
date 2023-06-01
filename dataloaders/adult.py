@@ -10,7 +10,7 @@ def get_adult_dataloaders(train_bs=64, test_bs=64, privilege_mode='sex'):
     elif privilege_mode == 'race':
         privileged_groups, unprivileged_groups = [{'race': 1}], [{'race': 0}]
 
-    dataset_orig = load_preproc_data_adult()
+    dataset_orig = load_preproc_data_adult([privilege_mode])
     data_orig_train, data_orig_val = dataset_orig.split([0.65], shuffle=True)
     data_orig_val, data_orig_test = data_orig_val.split([0.43], shuffle=True) # 0.43 * 0.35 = 0.15
 
