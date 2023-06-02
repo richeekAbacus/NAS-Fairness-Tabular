@@ -13,6 +13,8 @@ from aif360.algorithms.preprocessing.optim_preproc_helpers.data_preproc_function
 
 from aif360.datasets import AdultDataset, CompasDataset
 
+from dataloaders import ACSIncomeFolktablesDataset
+
 import argparse
 import numpy as np
 
@@ -27,6 +29,7 @@ np.random.seed(1234)
 
 parser = argparse.ArgumentParser(description='Run debiasing on Adult dataset')
 parser.add_argument("--dataset", type=str, default="adult",
+                    choices=["adult", "compas", "acs-income"],
                     help="dataset to use")
 parser.add_argument("--debiaser", type=str, default="adversarial_debiasing",
                     choices=["disparate_impact_remover",
@@ -70,6 +73,8 @@ def main():
         #                    privileged_classes=[['Female']], categorical_features=[],
         #                    features_to_keep=['age', 'priors_count', 'c_charge_degree'],
         #                    custom_preprocessing=compas_preproc)
+    elif args.dataset == "acs-income":
+        dd = ACSIncomeFolktablesDataset(protected_attr_name=args.privilege_mode)
 
     train_dataset, val_dataset = dd.split([0.65], shuffle=True)
     val_dataset, test_dataset = val_dataset.split([0.43], shuffle=True) # 0.43 * 0.35 = 0.15
