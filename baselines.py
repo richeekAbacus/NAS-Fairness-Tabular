@@ -8,9 +8,10 @@ from aif360.algorithms.postprocessing import (CalibratedEqOddsPostprocessing, Eq
 from aif360.metrics import BinaryLabelDatasetMetric, ClassificationMetric
 
 from aif360.algorithms.preprocessing.optim_preproc_helpers.opt_tools import OptTools
-from aif360.algorithms.preprocessing.optim_preproc_helpers.distortion_functions import get_distortion_adult
+from aif360.algorithms.preprocessing.optim_preproc_helpers.distortion_functions import get_distortion_adult, get_distortion_compas
+from aif360.algorithms.preprocessing.optim_preproc_helpers.data_preproc_functions import load_preproc_data_adult, load_preproc_data_compas
 
-from aif360.datasets import AdultDataset
+from aif360.datasets import AdultDataset, CompasDataset
 
 import argparse
 import numpy as np
@@ -20,7 +21,8 @@ from sklearn.preprocessing import StandardScaler
 
 import tensorflow.compat.v1 as tf
 tf.disable_eager_execution()
-tf.set_random_seed(42)
+tf.set_random_seed(1234)
+np.random.seed(1234)
 
 
 parser = argparse.ArgumentParser(description='Run debiasing on Adult dataset')
@@ -51,21 +53,26 @@ inprocessing = {"adversarial_debiasing", "gerryfair", "metafair", "prejudice_rem
                 "exponentiated_gradient_reduction", "grid_search_reduction"}
 postprocessing = {"calibrated_eq_odds", "eq_odds", "reject_option_classification"}
 
+def compas_preproc(df):
+    df['c_charge_degree'] = df['c_charge_degree'].replace(['F', 'M'], [0, 1])
+    return df
+
 def main():
-    ad = AdultDataset(protected_attribute_names=[args.privilege_mode],
-                        privileged_classes=[['Male']], categorical_features=[],
-                        features_to_keep=['age', 'education-num', 'capital-gain',
-                                        'capital-loss', 'hours-per-week'])
+    if args.dataset == "adult":
+        dd = load_preproc_data_adult([args.privilege_mode])
+        # dd = AdultDataset(protected_attribute_names=[args.privilege_mode],
+        #                   privileged_classes=[['Male']], categorical_features=[],
+        #                   features_to_keep=['age', 'education-num', 'capital-gain',
+        #                                     'capital-loss', 'hours-per-week'])
+    elif args.dataset == "compas":
+        dd = load_preproc_data_compas([args.privilege_mode])
+        # dd = CompasDataset(protected_attribute_names=[args.privilege_mode], favorable_classes=[0],
+        #                    privileged_classes=[['Female']], categorical_features=[],
+        #                    features_to_keep=['age', 'priors_count', 'c_charge_degree'],
+        #                    custom_preprocessing=compas_preproc)
 
-    train_dataset, val_dataset = ad.split([0.65], shuffle=True)
+    train_dataset, val_dataset = dd.split([0.65], shuffle=True)
     val_dataset, test_dataset = val_dataset.split([0.43], shuffle=True) # 0.43 * 0.35 = 0.15
-
-    # train_dataset = data_dict['train_dataset']
-    # val_dataset = data_dict['val_dataset']
-    # test_dataset = data_dict['test_dataset']
-
-    # privileged_groups = data_dict['privileged_groups']
-    # unprivileged_groups = data_dict['unprivileged_groups']
 
     privileged_groups = [{args.privilege_mode: 1}]
     unprivileged_groups = [{args.privilege_mode: 0}]
@@ -138,8 +145,12 @@ def main():
             print("\nTRANSFORMED Train set: Difference in mean outcomes between unprivileged and privileged groups = %f\n" % metrics_train_dataset.mean_difference())
 
         elif args.debiaser == "optim_proc":
+            distort_fn = {
+                "adult": get_distortion_adult,
+                "compas": get_distortion_compas
+            }
             optim_options = {
-                "distortion_fun": get_distortion_adult,
+                "distortion_fun": distort_fn[args.dataset],
                 "epsilon": 0.05,
                 "clist": [0.99, 1.99, 2.99],
                 "dlist": [.1, 0.05, 0]
@@ -173,20 +184,20 @@ def main():
             debias_model = AdversarialDebiasing(privileged_groups = privileged_groups,
                                     unprivileged_groups = unprivileged_groups,
                                     scope_name='debiased_classifier',
-                                    debias=True, sess=sess)
+                                    debias=True, sess=sess, num_epochs=200)
             debias_model.fit(train_dataset)
             dataset_debiasing_test = debias_model.predict(test_dataset)
 
         elif args.debiaser == "gerryfair":
             C, print_flag, gamma, max_iterations = 100, True, 0.005, 500
+            #! Need to use LogisticRegression as the base classifier, instead its LinearRegression now
             debias_model = GerryFairClassifier(C=C, printflag=print_flag, gamma=gamma,
-                                               max_iters=max_iterations, heatmapflag=False,
-                                               predictor=LogisticRegression(class_weight='balanced',
-                                                                            solver='liblinear'))
+                                               max_iters=max_iterations, heatmapflag=False)
             debias_model.fit(train_dataset, early_termination=True)
             dataset_debiasing_test = debias_model.predict(test_dataset)
         
         elif args.debiaser == "metafair":
+            #! Fails for different versions of the same dataset for reasons I dont fully understand
             debias_model = MetaFairClassifier(tau=0.9, sensitive_attr=args.privilege_mode,
                                               type='fdr').fit(train_dataset)
             dataset_debiasing_test = debias_model.predict(test_dataset)
