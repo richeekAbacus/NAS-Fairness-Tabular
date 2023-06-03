@@ -13,7 +13,7 @@ from aif360.algorithms.preprocessing.optim_preproc_helpers.data_preproc_function
 
 from aif360.datasets import AdultDataset, CompasDataset
 
-from dataloaders import ACSIncomeFolktablesDataset
+from dataloaders import ACSIncomeFolktablesDataset, get_distortion_acs_income
 
 import argparse
 import numpy as np
@@ -48,6 +48,8 @@ parser.add_argument("--debiaser", type=str, default="adversarial_debiasing",
                     help="debiasing algorithm to use")
 parser.add_argument("--privilege_mode", type=str, default='sex',
                     help="privileged group for the dataset")
+parser.add_argument("--log", type=str, default="",
+                    help="log file to write the test results to")
 args = parser.parse_args()
 
 
@@ -152,7 +154,8 @@ def main():
         elif args.debiaser == "optim_proc":
             distort_fn = {
                 "adult": get_distortion_adult,
-                "compas": get_distortion_compas
+                "compas": get_distortion_compas,
+                "acs-income": get_distortion_acs_income
             }
             optim_options = {
                 "distortion_fun": distort_fn[args.dataset],
@@ -194,7 +197,7 @@ def main():
             dataset_debiasing_test = debias_model.predict(test_dataset)
 
         elif args.debiaser == "gerryfair":
-            C, print_flag, gamma, max_iterations = 100, True, 0.005, 500
+            C, print_flag, gamma, max_iterations = 1000, True, 0.005, 500
             #! Need to use LogisticRegression as the base classifier, instead its LinearRegression now
             debias_model = GerryFairClassifier(C=C, printflag=print_flag, gamma=gamma,
                                                max_iters=max_iterations, heatmapflag=False)
@@ -310,6 +313,21 @@ def main():
     print("Test set: Average odds difference = %f" % classified_metric_debiasing_test.average_odds_difference())
     print("Test set: Theil_index = %f" % classified_metric_debiasing_test.theil_index())
 
+    if args.log != "":
+        with open(args.log, 'a') as file:
+            print("Dataset: ", args.dataset, ", Debiaser: ", args.debiaser,
+                  ", Privilege Mode: ", args.privilege_mode, file=file)
+            print("Classification accuracy", "Balanced classification accuracy",
+                  "Mean Difference", "Disparate impact", "Equal opportunity difference",
+                  "Average odds difference", "Theil_index", file=file, sep=",")
+            print(classified_metric_debiasing_test.accuracy(),
+                bal_acc_debiasing_test,
+                metric_dataset_debiasing_test.mean_difference(),
+                classified_metric_debiasing_test.disparate_impact(),
+                classified_metric_debiasing_test.equal_opportunity_difference(),
+                classified_metric_debiasing_test.average_odds_difference(),
+                classified_metric_debiasing_test.theil_index(),
+                sep=',', end='\n\n', file=file)
 
 if __name__ == '__main__':
     main()

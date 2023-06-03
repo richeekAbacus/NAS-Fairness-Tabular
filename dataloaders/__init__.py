@@ -1,3 +1,3 @@
 from .adult import *
 from .dataloader import *
-from .folktable import ACSIncomeFolktablesDataset
+from .folktable import *
