@@ -54,11 +54,6 @@ while True:
         with open(os.path.join(run_path, 'runhistory.json'), 'r') as f:
             runhistory = json.load(f)
             print("CONFIGS FINISHED RUNNING: ", runhistory["stats"]["finished"])
-            if runhistory["stats"]["finished"] >= N_TRIALS:
-                print('SMAC RUN FINISHED...')
-                print('Exiting in 10 seconds...')
-                time.sleep(10)
-                break
             if runhistory["stats"]["finished"] >= (NUM_RESTARTS+1)*args.num_configs_switch:
                 print('KILLING THE SMAC_RUN WITH PID:', pid)
                 os.kill(pid, signal.SIGTERM)
@@ -69,6 +64,11 @@ while True:
                     pid = process.pid
                 print('SMAC Run: ', ' '.join(SMAC_RUN), 'continuing with PID:', pid)
                 NUM_RESTARTS += 1
+            if runhistory["stats"]["finished"] >= N_TRIALS:
+                print('SMAC RUN FINISHED...')
+                print('Exiting in 10 seconds...')
+                time.sleep(10)
+                break
     else:
         print(os.path.join(run_path, 'runhistory.json'), 'NOT FOUND...')
         print('WAITING FOR THE FILE TO BE CREATED')
