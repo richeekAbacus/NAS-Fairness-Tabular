@@ -89,7 +89,7 @@ if __name__ == "__main__":
         initial_design=initial_design,
         multi_objective_algorithm=multi_objective_algorithm,
         intensifier=intensifier,
-        overwrite=True,
+        overwrite=False,
     )
 
     incumbents = smac.optimize()
