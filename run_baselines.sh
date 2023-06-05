@@ -10,7 +10,7 @@ echo "Logging to $log_name"
 rm $log_name
 
 
-methods=("reweighing" "disparate_impact_remover"  "lfr" "optim_proc"
+methods=("logistic-regression" "reweighing" "disparate_impact_remover"  "lfr" "optim_proc"
          "adversarial_debiasing" "gerryfair" "metafair" "prejudice_remover"
          "exponentiated_gradient_reduction" "grid_search_reduction"
          "calibrated_eq_odds" "eq_odds" "reject_option_classification")

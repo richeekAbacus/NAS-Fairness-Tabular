@@ -44,7 +44,8 @@ parser.add_argument("--debiaser", type=str, default="adversarial_debiasing",
                              "grid_search_reduction",
                              "calibrated_eq_odds",
                              "eq_odds",
-                             "reject_option_classification"],
+                             "reject_option_classification",
+                             "logistic-regression"],
                     help="debiasing algorithm to use")
 parser.add_argument("--privilege_mode", type=str, default='sex',
                     help="privileged group for the dataset")
@@ -231,7 +232,7 @@ def main():
             debias_model.fit(train_dataset)
             dataset_debiasing_test = debias_model.predict(test_dataset)
 
-    elif args.debiaser in postprocessing:
+    elif args.debiaser in postprocessing or args.debiaser == "logistic-regression":
         scale_orig = StandardScaler()
         X_train = scale_orig.fit_transform(train_dataset.features)
         y_train = train_dataset.labels.ravel()
@@ -289,8 +290,11 @@ def main():
                                                       metric_lb=-0.05, metric_ub=0.05)
             debias_model = debias_model.fit(val_dataset, val_pred)
             dataset_debiasing_test = debias_model.predict(test_pred)
+        
+        elif args.debiaser == "logistic-regression": # No debiasing baseline
+            dataset_debiasing_test = test_pred
 
-            
+
     # Metric for the debiased dataset #################################################################
     print("\n\nDebiased Test Results: ")
     metric_dataset_debiasing_test = BinaryLabelDatasetMetric(dataset_debiasing_test, 
