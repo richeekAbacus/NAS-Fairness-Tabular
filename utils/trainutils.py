@@ -1,3 +1,4 @@
+import rtdl
 import torch
 
 def train(model, optimizer, train_loader, loss_fn, epoch, report_freq=100):
@@ -7,7 +8,10 @@ def train(model, optimizer, train_loader, loss_fn, epoch, report_freq=100):
         x = x.to('cuda')
         y = y.to('cuda')
         optimizer.zero_grad()
-        y_hat = model(x, None) #! add another parameter instead of hardcoding None
+        if isinstance(model, rtdl.FTTransformer):
+            y_hat = model(x, None) #! FTTransformer takes in x_num and x_cat
+        else:
+            y_hat = model(x)
         loss = loss_fn(y_hat, y)
         prediction = torch.round(torch.sigmoid(y_hat))
         correct = prediction.eq(y.view_as(prediction)).sum().item()
@@ -29,10 +33,13 @@ def test(model, test_loader, loss_fn, epoch):
         for x, y in test_loader:
             x = x.to('cuda')
             y = y.to('cuda')
-            y_hat = model(x, None) #! add another parameter instead of hardcoding None
-            pred_y.append(y_hat)
+            if isinstance(model, rtdl.FTTransformer):
+                y_hat = model(x, None) #! add another parameter instead of hardcoding None
+            else:
+                y_hat = model(x)
             loss += loss_fn(y_hat, y).item()
             prediction = torch.round(torch.sigmoid(y_hat))
+            pred_y.append(prediction)
             correct += prediction.eq(y.view_as(prediction)).sum().item()
             count += 1
 
@@ -40,7 +47,6 @@ def test(model, test_loader, loss_fn, epoch):
     accuracy = correct / len(test_loader.dataset)
 
     pred_y = torch.cat(pred_y, dim=0)
-    pred_y = torch.round(torch.sigmoid(pred_y))
 
     return loss, accuracy, pred_y
 

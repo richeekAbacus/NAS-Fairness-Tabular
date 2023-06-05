@@ -13,8 +13,13 @@ from aif360.algorithms.preprocessing.optim_preproc_helpers.data_preproc_function
 
 from aif360.datasets import AdultDataset, CompasDataset
 
-from dataloaders import ACSIncomeFolktablesDataset, get_distortion_acs_income
+from utils import train, test
+from dataloaders import ACSIncomeFolktablesDataset, get_distortion_acs_income, get_dataloaders
 
+import torch
+import torch.nn.functional as F
+
+import rtdl
 import argparse
 import numpy as np
 
@@ -45,7 +50,10 @@ parser.add_argument("--debiaser", type=str, default="adversarial_debiasing",
                              "calibrated_eq_odds",
                              "eq_odds",
                              "reject_option_classification",
-                             "logistic-regression"],
+                             "logistic-regression",
+                             "mlp",
+                             "resnet",
+                             "fttransformer"],
                     help="debiasing algorithm to use")
 parser.add_argument("--privilege_mode", type=str, default='sex',
                     help="privileged group for the dataset")
@@ -53,7 +61,7 @@ parser.add_argument("--log", type=str, default="",
                     help="log file to write the test results to")
 args = parser.parse_args()
 
-
+noprocessing = {"logistic-regression", "mlp", "resnet", "fttransformer"}
 preprocessing = {"disparate_impact_remover", "reweighing", "lfr", "optim_proc"}
 inprocessing = {"adversarial_debiasing", "gerryfair", "metafair", "prejudice_remover",
                 "exponentiated_gradient_reduction", "grid_search_reduction"}
@@ -232,7 +240,7 @@ def main():
             debias_model.fit(train_dataset)
             dataset_debiasing_test = debias_model.predict(test_dataset)
 
-    elif args.debiaser in postprocessing or args.debiaser == "logistic-regression":
+    elif args.debiaser in postprocessing:
         scale_orig = StandardScaler()
         X_train = scale_orig.fit_transform(train_dataset.features)
         y_train = train_dataset.labels.ravel()
@@ -290,10 +298,84 @@ def main():
                                                       metric_lb=-0.05, metric_ub=0.05)
             debias_model = debias_model.fit(val_dataset, val_pred)
             dataset_debiasing_test = debias_model.predict(test_pred)
-        
-        elif args.debiaser == "logistic-regression": # No debiasing baseline
-            dataset_debiasing_test = test_pred
+    
+    elif args.debiaser in noprocessing:
+        train_loader, val_loader, test_loader = get_dataloaders(train_dataset, val_dataset,
+                                                                test_dataset, 64, 64)
+        num_features = train_loader.dataset[0][0].shape[0]
+        criterion = F.binary_cross_entropy_with_logits
 
+        if args.debiaser == "logistic-regression":
+            scale_orig = StandardScaler()
+            X_train = scale_orig.fit_transform(train_dataset.features)
+            y_train = train_dataset.labels.ravel()
+            lmod = LogisticRegression()
+            lmod.fit(X_train, y_train)
+
+            fav_idx = np.where(lmod.classes_ == train_dataset.favorable_label)[0][0]
+
+            X_test = scale_orig.transform(test_dataset.features)
+            y_test_pred_prob = lmod.predict_proba(X_test)[:,fav_idx]
+
+            dataset_debiasing_test = test_dataset.copy(deepcopy=True)
+
+            class_thresh = 0.5
+            dataset_debiasing_test.scores = y_test_pred_prob.reshape(-1,1)
+                
+            y_test_pred = np.zeros_like(dataset_debiasing_test.labels)
+            y_test_pred[y_test_pred_prob >= class_thresh] = dataset_debiasing_test.favorable_label
+            y_test_pred[~(y_test_pred_prob >= class_thresh)] = dataset_debiasing_test.unfavorable_label
+        
+        elif args.debiaser == "mlp":
+            model = rtdl.MLP.make_baseline(num_features, [32, 256, 256, 256, 32], 0.25, 1)
+            model.to('cuda')
+            optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+            for epoch in range(10):
+                train(model, optimizer, train_loader, criterion, epoch)
+                print("#"*30)
+                loss, val_acc, _ = test(model, val_loader, criterion, epoch)
+                print('Epoch: {}, Val Loss: {}, Val Accuracy: {}'.format(epoch, loss, val_acc))
+            _, _, pred_y_test = test(model, test_loader, criterion, None)
+
+            dataset_debiasing_test = test_dataset.copy(deepcopy=True)
+            y_test_pred = pred_y_test.cpu().numpy()
+
+        elif args.debiaser == "resnet":
+            model = rtdl.ResNet.make_baseline(d_in=num_features, n_blocks=6, d_main=64,
+                                              d_hidden=256, dropout_first=0.25,
+                                              dropout_second=0.0, d_out=1)
+            model.to('cuda')
+            optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+            for epoch in range(10):
+                train(model, optimizer, train_loader, criterion, epoch)
+                print("#"*30)
+                loss, val_acc, _ = test(model, val_loader, criterion, epoch)
+                print('Epoch: {}, Val Loss: {}, Val Accuracy: {}'.format(epoch, loss, val_acc))
+            _, _, pred_y_test = test(model, test_loader, criterion, None)
+
+            dataset_debiasing_test = test_dataset.copy(deepcopy=True)
+            y_test_pred = pred_y_test.cpu().numpy()
+        
+        elif args.debiaser == "fttransformer":
+            model = rtdl.FTTransformer.make_baseline(n_num_features=num_features,
+                                                     cat_cardinalities=None, d_token=8*24,
+                                                     n_blocks=4, attention_dropout=0.2,
+                                                     ffn_d_hidden=256, ffn_dropout=0.1,
+                                                     residual_dropout=0.0,
+                                                     last_layer_query_idx=[-1], d_out=1)
+            model.to('cuda')
+            optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+            for epoch in range(10):
+                train(model, optimizer, train_loader, criterion, epoch)
+                print("#"*30)
+                loss, val_acc, _ = test(model, val_loader, criterion, epoch)
+                print('Epoch: {}, Val Loss: {}, Val Accuracy: {}'.format(epoch, loss, val_acc))
+            _, _, pred_y_test = test(model, test_loader, criterion, None)
+
+            dataset_debiasing_test = test_dataset.copy(deepcopy=True)
+            y_test_pred = pred_y_test.cpu().numpy()
+
+        dataset_debiasing_test.labels = y_test_pred
 
     # Metric for the debiased dataset #################################################################
     print("\n\nDebiased Test Results: ")
