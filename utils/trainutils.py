@@ -28,6 +28,7 @@ def test(model, test_loader, loss_fn, epoch):
     loss = 0
     correct = 0
     pred_y = []
+    scores_y = []
     count = 0
     with torch.no_grad():
         for x, y in test_loader:
@@ -39,6 +40,7 @@ def test(model, test_loader, loss_fn, epoch):
                 y_hat = model(x)
             loss += loss_fn(y_hat, y).item()
             prediction = torch.round(torch.sigmoid(y_hat))
+            scores_y.append(torch.sigmoid(y_hat))
             pred_y.append(prediction)
             correct += prediction.eq(y.view_as(prediction)).sum().item()
             count += 1
@@ -47,6 +49,7 @@ def test(model, test_loader, loss_fn, epoch):
     accuracy = correct / len(test_loader.dataset)
 
     pred_y = torch.cat(pred_y, dim=0)
+    scores_y = torch.cat(scores_y, dim=0)
 
-    return loss, accuracy, pred_y
+    return loss, accuracy, pred_y, scores_y
 

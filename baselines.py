@@ -24,11 +24,12 @@ import argparse
 import numpy as np
 
 from sklearn.linear_model import LogisticRegression
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
 
 import tensorflow.compat.v1 as tf
 tf.disable_eager_execution()
 tf.set_random_seed(1234)
+torch.manual_seed(1234)
 np.random.seed(1234)
 
 
@@ -50,28 +51,49 @@ parser.add_argument("--debiaser", type=str, default="adversarial_debiasing",
                              "calibrated_eq_odds",
                              "eq_odds",
                              "reject_option_classification",
-                             "logistic-regression",
-                             "mlp",
-                             "resnet",
-                             "fttransformer"],
+                             "none"],
                     help="debiasing algorithm to use")
 parser.add_argument("--privilege_mode", type=str, default='sex',
                     help="privileged group for the dataset")
+parser.add_argument("--model", type=str, default="logistic-regression",
+                    choices=["logistic-regression", "mlp", "resnet", "fttransformer"],
+                    help="model to use for pre/post-processing")
 parser.add_argument("--log", type=str, default="",
                     help="log file to write the test results to")
 args = parser.parse_args()
 
-noprocessing = {"logistic-regression", "mlp", "resnet", "fttransformer"}
+models = {"logistic-regression", "mlp", "resnet", "fttransformer"}
 preprocessing = {"disparate_impact_remover", "reweighing", "lfr", "optim_proc"}
 inprocessing = {"adversarial_debiasing", "gerryfair", "metafair", "prejudice_remover",
                 "exponentiated_gradient_reduction", "grid_search_reduction"}
 postprocessing = {"calibrated_eq_odds", "eq_odds", "reject_option_classification"}
 
-def compas_preproc(df):
-    df['c_charge_degree'] = df['c_charge_degree'].replace(['F', 'M'], [0, 1])
-    return df
+def check_args():
+    if args.debiaser == "reweighing":
+        assert args.model == "logistic-regression", "Reweighing only works with logistic regression"
+
+def trainer(model, optimizer, train_loader, val_loader, test_loader, criterion, epochs=10):
+    best_acc = 0.0
+    for epoch in range(epochs):
+        train(model, optimizer, train_loader, criterion, epoch)
+        print("#"*30)
+        loss, val_acc, _, _ = test(model, val_loader, criterion, epoch)
+        if val_acc > best_acc:
+            best_acc = val_acc
+            torch.save(model.state_dict(), f'logs/best_model_{model.__class__.__name__}.pt')
+        print('Epoch: {}, Val Loss: {}, Val Accuracy: {}'.format(epoch, loss, val_acc))
+    model.load_state_dict(torch.load(f'logs/best_model_{model.__class__.__name__}.pt'))
+    _, _, pred_y_val, scores_y_val = test(model, val_loader, criterion, None)
+    _, _, pred_y_test, scores_y_test = test(model, test_loader, criterion, None)
+    return pred_y_val, pred_y_test, scores_y_val, scores_y_test
+
+# def compas_preproc(df):
+#     df['c_charge_degree'] = df['c_charge_degree'].replace(['F', 'M'], [0, 1])
+#     return df
 
 def main():
+    check_args()
+    
     if args.dataset == "adult":
         dd = load_preproc_data_adult([args.privilege_mode])
         # dd = AdultDataset(protected_attribute_names=[args.privilege_mode],
@@ -110,8 +132,6 @@ def main():
 
     # Debiasing techniques ############################################################################
     if args.debiaser in preprocessing:
-        lmod = None
-        X_tr, y_tr, X_te = None, None, None
         if args.debiaser == "reweighing":
             debias_model = Reweighing(unprivileged_groups=unprivileged_groups,
                                       privileged_groups=privileged_groups)
@@ -132,8 +152,9 @@ def main():
             lmod.fit(X_tr, y_tr, sample_weight=w_tr)
 
         elif args.debiaser == "disparate_impact_remover":
-            debias_model = DisparateImpactRemover(repair_level=1.0)
+            debias_model = DisparateImpactRemover(repair_level=1.0, sensitive_attribute=args.privilege_mode)
             train_repd = debias_model.fit_transform(train_dataset)
+            val_repd = debias_model.fit_transform(val_dataset)
             test_repd = debias_model.fit_transform(test_dataset)
 
             metrics_train_dataset = BinaryLabelDatasetMetric(train_repd,
@@ -141,9 +162,9 @@ def main():
                                                             privileged_groups=privileged_groups)
             print("\nTRANSFORMED Train set: Difference in mean outcomes between unprivileged and privileged groups = %f\n" % metrics_train_dataset.mean_difference())
             
-            X_tr = np.delete(train_repd.features, index, axis=1)
-            y_tr = train_repd.labels.ravel()
-            X_te = np.delete(test_repd.features, index, axis=1)
+            train_repd.features = np.delete(train_repd.features, index, axis=1)
+            val_repd.features = np.delete(val_repd.features, index, axis=1)
+            test_repd.features = np.delete(test_repd.features, index, axis=1)
 
         elif args.debiaser == "lfr":
             debias_model = LFR(unprivileged_groups=unprivileged_groups,
@@ -153,7 +174,8 @@ def main():
             debias_model = debias_model.fit(train_dataset, maxiter=5000, maxfun=5000)
 
             train_repd = debias_model.transform(train_dataset)
-            test_repd = debias_model.transform(test_dataset)
+            val_repd = val_dataset
+            test_repd = test_dataset
 
             metrics_train_dataset = BinaryLabelDatasetMetric(train_repd,
                                                             unprivileged_groups=unprivileged_groups,
@@ -177,6 +199,7 @@ def main():
             debias_model = debias_model.fit(train_dataset)
 
             train_repd = debias_model.transform(train_dataset, transform_Y=True)
+            val_repd = debias_model.transform(val_dataset, transform_Y=True)
             test_repd = debias_model.transform(test_dataset, transform_Y=True)
 
             metrics_train_dataset = BinaryLabelDatasetMetric(train_repd,
@@ -184,18 +207,78 @@ def main():
                                                             privileged_groups=privileged_groups)
             print("\nTRANSFORMED Train set: Difference in mean outcomes between unprivileged and privileged groups = %f" % metrics_train_dataset.mean_difference())
 
-        if lmod is None:
-            X_tr = train_repd.features if X_tr is None else X_tr
-            y_tr = train_repd.labels.ravel() if y_tr is None else y_tr
-            X_te = test_repd.features if X_te is None else X_te
+    # Setup datasets for learning algorithm based on debiaser #########################################
+    if args.debiaser in preprocessing and args.debiaser != "reweighing":
+        train_dataset, val_dataset, test_dataset = train_repd, val_repd, test_repd
+        X_tr = train_repd.features 
+        y_tr = train_repd.labels.ravel() 
+        X_val = val_repd.features
+        X_te = test_repd.features
 
+    elif args.debiaser in postprocessing or args.debiaser == "none":
+        scale_orig = StandardScaler()
+        X_tr = scale_orig.fit_transform(train_dataset.features)
+        y_tr = train_dataset.labels.ravel()
+        X_val = scale_orig.fit_transform(val_dataset.features)
+        X_te = scale_orig.fit_transform(test_dataset.features)
+    
+    # Train model on source dataset ###################################################################
+    if args.debiaser not in inprocessing and args.debiaser != "reweighing":
+        # Placeholder for predicted and transformed datasets
+        val_pred = val_dataset.copy(deepcopy=True)
+        test_pred = test_dataset.copy(deepcopy=True)
+
+        if args.model == "logistic-regression":
             lmod = LogisticRegression(class_weight='balanced', solver='liblinear')
             lmod.fit(X_tr, y_tr)
 
-        dataset_debiasing_test = test_dataset.copy()
-        dataset_debiasing_test.labels = lmod.predict(X_te).reshape(-1,1)
+            fav_idx = np.where(lmod.classes_ == train_dataset.favorable_label)[0][0]
 
-    elif args.debiaser in inprocessing:
+            # Prediction probs for validation and testing data
+            val_pred.scores = lmod.predict_proba(X_val)[:,fav_idx].reshape(-1,1)
+            test_pred.scores = lmod.predict_proba(X_te)[:,fav_idx].reshape(-1,1)
+
+            val_pred.labels = lmod.predict(X_val).reshape(-1,1)
+            test_pred.labels = lmod.predict(X_te).reshape(-1,1)
+
+        else:
+            train_loader, val_loader, test_loader = get_dataloaders(train_dataset, val_dataset,
+                                                                    test_dataset, 64, 64)
+            num_features = train_loader.dataset[0][0].shape[0]
+            criterion = F.binary_cross_entropy_with_logits
+
+            if args.model == "mlp":
+                model = rtdl.MLP.make_baseline(num_features, [32, 256, 256, 256, 32], 0.25, 1)
+            
+            elif args.model == "resnet":
+                model = rtdl.ResNet.make_baseline(d_in=num_features, n_blocks=6, d_main=64,
+                                                  d_hidden=256, dropout_first=0.25,
+                                                  dropout_second=0.0, d_out=1)
+            
+            elif args.model == "fttransformer":
+                model = rtdl.FTTransformer.make_baseline(n_num_features=num_features,
+                                                         cat_cardinalities=None, d_token=8*24,
+                                                         n_blocks=4, attention_dropout=0.2,
+                                                         ffn_d_hidden=256, ffn_dropout=0.1,
+                                                         residual_dropout=0.0,
+                                                         last_layer_query_idx=[-1], d_out=1)
+
+            model.to('cuda')
+            optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+            (pred_y_val, pred_y_test,
+             scores_y_val, scores_y_test) = trainer(model, optimizer, train_loader,
+                                                    val_loader, test_loader, criterion)
+            val_pred.labels = pred_y_val.cpu().numpy()
+            test_pred.labels = pred_y_test.cpu().numpy()
+            val_pred.scores = scores_y_val.cpu().numpy()
+            test_pred.scores = scores_y_test.cpu().numpy()
+
+    # If not postprocessing then we just directly use the predicted labels as the debiased dataset #####
+    if args.debiaser in preprocessing or args.debiaser == "none":
+        dataset_debiasing_test = test_pred
+
+    # Inprocessing debiasing techniques ################################################################
+    if args.debiaser in inprocessing:
         if args.debiaser == "adversarial_debiasing":
             sess = tf.Session()
             debias_model = AdversarialDebiasing(privileged_groups = privileged_groups,
@@ -240,40 +323,7 @@ def main():
             debias_model.fit(train_dataset)
             dataset_debiasing_test = debias_model.predict(test_dataset)
 
-    elif args.debiaser in postprocessing:
-        scale_orig = StandardScaler()
-        X_train = scale_orig.fit_transform(train_dataset.features)
-        y_train = train_dataset.labels.ravel()
-        lmod = LogisticRegression()
-        lmod.fit(X_train, y_train)
-
-        fav_idx = np.where(lmod.classes_ == train_dataset.favorable_label)[0][0]
-
-        # Prediction probs for validation and testing data
-        X_valid = scale_orig.transform(val_dataset.features)
-        y_valid_pred_prob = lmod.predict_proba(X_valid)[:,fav_idx]
-
-        X_test = scale_orig.transform(test_dataset.features)
-        y_test_pred_prob = lmod.predict_proba(X_test)[:,fav_idx]
-
-        # Placeholder for predicted and transformed datasets
-        val_pred = val_dataset.copy(deepcopy=True)
-        test_pred = test_dataset.copy(deepcopy=True)
-
-        class_thresh = 0.5
-        val_pred.scores = y_valid_pred_prob.reshape(-1,1)
-        test_pred.scores = y_test_pred_prob.reshape(-1,1)
-
-        y_valid_pred = np.zeros_like(val_pred.labels)
-        y_valid_pred[y_valid_pred_prob >= class_thresh] = val_pred.favorable_label
-        y_valid_pred[~(y_valid_pred_prob >= class_thresh)] = val_pred.unfavorable_label
-        val_pred.labels = y_valid_pred
-            
-        y_test_pred = np.zeros_like(test_pred.labels)
-        y_test_pred[y_test_pred_prob >= class_thresh] = test_pred.favorable_label
-        y_test_pred[~(y_test_pred_prob >= class_thresh)] = test_pred.unfavorable_label
-        test_pred.labels = y_test_pred
-
+    if args.debiaser in postprocessing:
         if args.debiaser == "calibrated_eq_odds":
             debias_model = CalibratedEqOddsPostprocessing(privileged_groups=privileged_groups,
                                                  unprivileged_groups=unprivileged_groups,
@@ -299,83 +349,6 @@ def main():
             debias_model = debias_model.fit(val_dataset, val_pred)
             dataset_debiasing_test = debias_model.predict(test_pred)
     
-    elif args.debiaser in noprocessing:
-        train_loader, val_loader, test_loader = get_dataloaders(train_dataset, val_dataset,
-                                                                test_dataset, 64, 64)
-        num_features = train_loader.dataset[0][0].shape[0]
-        criterion = F.binary_cross_entropy_with_logits
-
-        if args.debiaser == "logistic-regression":
-            scale_orig = StandardScaler()
-            X_train = scale_orig.fit_transform(train_dataset.features)
-            y_train = train_dataset.labels.ravel()
-            lmod = LogisticRegression()
-            lmod.fit(X_train, y_train)
-
-            fav_idx = np.where(lmod.classes_ == train_dataset.favorable_label)[0][0]
-
-            X_test = scale_orig.transform(test_dataset.features)
-            y_test_pred_prob = lmod.predict_proba(X_test)[:,fav_idx]
-
-            dataset_debiasing_test = test_dataset.copy(deepcopy=True)
-
-            class_thresh = 0.5
-            dataset_debiasing_test.scores = y_test_pred_prob.reshape(-1,1)
-                
-            y_test_pred = np.zeros_like(dataset_debiasing_test.labels)
-            y_test_pred[y_test_pred_prob >= class_thresh] = dataset_debiasing_test.favorable_label
-            y_test_pred[~(y_test_pred_prob >= class_thresh)] = dataset_debiasing_test.unfavorable_label
-        
-        elif args.debiaser == "mlp":
-            model = rtdl.MLP.make_baseline(num_features, [32, 256, 256, 256, 32], 0.25, 1)
-            model.to('cuda')
-            optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-            for epoch in range(10):
-                train(model, optimizer, train_loader, criterion, epoch)
-                print("#"*30)
-                loss, val_acc, _ = test(model, val_loader, criterion, epoch)
-                print('Epoch: {}, Val Loss: {}, Val Accuracy: {}'.format(epoch, loss, val_acc))
-            _, _, pred_y_test = test(model, test_loader, criterion, None)
-
-            dataset_debiasing_test = test_dataset.copy(deepcopy=True)
-            y_test_pred = pred_y_test.cpu().numpy()
-
-        elif args.debiaser == "resnet":
-            model = rtdl.ResNet.make_baseline(d_in=num_features, n_blocks=6, d_main=64,
-                                              d_hidden=256, dropout_first=0.25,
-                                              dropout_second=0.0, d_out=1)
-            model.to('cuda')
-            optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-            for epoch in range(10):
-                train(model, optimizer, train_loader, criterion, epoch)
-                print("#"*30)
-                loss, val_acc, _ = test(model, val_loader, criterion, epoch)
-                print('Epoch: {}, Val Loss: {}, Val Accuracy: {}'.format(epoch, loss, val_acc))
-            _, _, pred_y_test = test(model, test_loader, criterion, None)
-
-            dataset_debiasing_test = test_dataset.copy(deepcopy=True)
-            y_test_pred = pred_y_test.cpu().numpy()
-        
-        elif args.debiaser == "fttransformer":
-            model = rtdl.FTTransformer.make_baseline(n_num_features=num_features,
-                                                     cat_cardinalities=None, d_token=8*24,
-                                                     n_blocks=4, attention_dropout=0.2,
-                                                     ffn_d_hidden=256, ffn_dropout=0.1,
-                                                     residual_dropout=0.0,
-                                                     last_layer_query_idx=[-1], d_out=1)
-            model.to('cuda')
-            optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-            for epoch in range(10):
-                train(model, optimizer, train_loader, criterion, epoch)
-                print("#"*30)
-                loss, val_acc, _ = test(model, val_loader, criterion, epoch)
-                print('Epoch: {}, Val Loss: {}, Val Accuracy: {}'.format(epoch, loss, val_acc))
-            _, _, pred_y_test = test(model, test_loader, criterion, None)
-
-            dataset_debiasing_test = test_dataset.copy(deepcopy=True)
-            y_test_pred = pred_y_test.cpu().numpy()
-
-        dataset_debiasing_test.labels = y_test_pred
 
     # Metric for the debiased dataset #################################################################
     print("\n\nDebiased Test Results: ")
@@ -402,7 +375,7 @@ def main():
     if args.log != "":
         with open(args.log, 'a') as file:
             print("Dataset: ", args.dataset, ", Debiaser: ", args.debiaser,
-                  ", Privilege Mode: ", args.privilege_mode, file=file)
+                  ", Model: ", args.model, ", Privilege Mode: ", args.privilege_mode, file=file)
             print("Classification accuracy", "Balanced classification accuracy",
                   "Mean Difference", "Disparate impact", "Equal opportunity difference",
                   "Average odds difference", "Theil_index", file=file, sep=",")
