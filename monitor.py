@@ -10,6 +10,10 @@ import subprocess
 parser = argparse.ArgumentParser(description='Monitor SMAC runs and kill if they exceed the number of consecutive config runs')
 parser.add_argument('--run_name', type=str, default='test',
                     help='Name of the run to monitor')
+parser.add_argument('--dataset', type=str, default='adult',
+                    help='Dataset to run method')
+parser.add_argument('--privilege_mode', type=str, default='sex',
+                    help='Privilege mode to run method')
 parser.add_argument('--num_configs_switch', type=int, default=50,
                     help='Number of configurations to run before kill switching')
 parser.add_argument('--fairness_metric', type=str, default='statistical_parity_difference',
@@ -19,12 +23,15 @@ args = parser.parse_args()
 SEED = 42
 N_TRIALS = 200
 run_name = args.run_name
+dataset = args.dataset
+privilege_mode = args.privilege_mode
 fairness_metric = args.fairness_metric
 run_path = f'results/{run_name}/{SEED}/'
 
 # Define the SMAC Run with all the arguments
 SMAC_RUN = ['python3', 'train.py',
-    '--dataset', 'adult',
+    '--dataset', dataset,
+    '--privilege_mode', privilege_mode,
     '--train_bs', '64',
     '--test_bs', '64',
     '--model', 'FTTransformer',

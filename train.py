@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import csv
 import torch
 import argparse
 
@@ -10,7 +12,7 @@ from smac.intensifier.hyperband import Hyperband
 
 from ConfigSpace import Configuration
 
-from utils import plot_pareto
+from utils import plot_pareto, get_fairness_obj, log_fairness_metrics
 from dataloaders import get_adult_dataloaders
 from fttransformer_nas import FTTransformerSearch
 
@@ -99,22 +101,32 @@ if __name__ == "__main__":
     print("Found: ", len(incumbents), " configurations on the pareto front!")
 
     default_config = model_search.configspace.get_default_configuration()
-    train_acc, val_acc, test_acc, val_spd, test_spd = model_search.create_and_train_model_from_config(config=default_config, budget=args.eval_budget)
+    train_acc, val_acc, test_acc, val_class_metric, test_class_metric =\
+        model_search.create_and_train_model_from_config_new(config=default_config, budget=args.eval_budget)
     print(f"\nDefault train score: {train_acc}")
     print(f"Default val score: {val_acc}")
     print(f"Default test score: {test_acc}")
-    print(f"Default val statistical parity difference: {val_spd}")
-    print(f"Default test statistical parity difference: {test_spd} \n\n")
+    print(f"Default val fairness obj: {get_fairness_obj(val_class_metric, args.fairness_metric)}")
+    print(f"Default test fairness obj: {get_fairness_obj(test_class_metric, args.fairness_metric)} \n\n")
+
+    with open(os.path.join(args.output_dir, args.run_name, str(args.seed), 'incumbents.csv'), 'w') as f:
+        f.write("Model, Classification accuracy, Balanced classification accuracy, Mean Difference, Disparate impact, Equal opportunity difference, Average odds difference, Theil_index\n")
+        f.write('Default,' + ','.join(str(x) for x in log_fairness_metrics(test_class_metric)) + '\n')
 
     for idx, incumbent in enumerate(incumbents):
         print(f"\nIncumbent {idx}")
-        train_acc, val_acc, test_acc, val_spd, test_spd = model_search.create_and_train_model_from_config(config=incumbent, budget=args.eval_budget)
+        train_acc, val_acc, test_acc, val_class_metric, test_class_metric =\
+            model_search.create_and_train_model_from_config_new(config=incumbent, budget=args.eval_budget)
         print(f"\nIncumbent {idx}")
         print(f"\nIncumbent train score: {train_acc}")
         print(f"Incumbent val score: {val_acc}")
         print(f"Incumbent test score: {test_acc}")
-        print(f"Incumbent val statistical parity difference: {val_spd}")
-        print(f"Incumbent test statistical parity difference: {test_spd} \n\n")
-    
+        print(f"Incumbent val fairness obj: {get_fairness_obj(val_class_metric, args.fairness_metric)}")
+        print(f"Incumbent test fairness obj: {get_fairness_obj(test_class_metric, args.fairness_metric)} \n\n")
+
+        with open(os.path.join(args.output_dir, args.run_name, str(args.seed), 'incumbents.csv'), 'a') as f:
+            f.write('Incumbent{},'.format(idx) +\
+                    ','.join(str(x) for x in log_fairness_metrics(test_class_metric)) + '\n')
+
     if args.multi_objective:
         plot_pareto(smac, incumbents, args)

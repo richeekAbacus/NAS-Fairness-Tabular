@@ -8,6 +8,7 @@ __pycache__/
 
 data/
 results/
+results copy/
 logs/
 
 # Distribution / packaging
