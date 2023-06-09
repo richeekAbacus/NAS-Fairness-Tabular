@@ -5,6 +5,9 @@ from aif360.datasets import StandardDataset
 
 import numpy as np
 import pandas as pd
+from sklearn.preprocessing import MaxAbsScaler
+
+from .dataloader import get_dataloaders
 
 
 def get_distortion_acs_income(vold, vnew):
@@ -66,6 +69,36 @@ def get_distortion_acs_income(vold, vnew):
         return 1.0
     else:
         return 0.0
+
+
+def get_acsincome_dataloaders(train_bs=64, test_bs=64, privilege_mode='SEX', scale=True):
+    privileged_groups, unprivileged_groups = [{privilege_mode: 1}], [{privilege_mode: 0}]
+    
+    dataset_orig = ACSIncomeFolktablesDataset(protected_attr_name=privilege_mode)
+    data_orig_train, data_orig_val = dataset_orig.split([0.65], shuffle=True)
+    data_orig_val, data_orig_test = data_orig_val.split([0.43], shuffle=True) # 0.43 * 0.35 = 0.15
+
+    if scale:
+        preproc = MaxAbsScaler()
+        data_orig_train.features = preproc.fit_transform(data_orig_train.features)
+        data_orig_val.features = preproc.fit_transform(data_orig_val.features)
+        data_orig_test.features = preproc.fit_transform(data_orig_test.features)
+
+    train_loader, val_loader, test_loader = get_dataloaders(data_orig_train, data_orig_val,
+                                                            data_orig_test, train_bs=train_bs,
+                                                            test_bs=test_bs)
+    data = {
+        'task_type': 'bin-class',
+        'train_loader': train_loader,
+        'val_loader': val_loader,
+        'test_loader': test_loader,
+        'train_dataset': data_orig_train,
+        'val_dataset': data_orig_val,
+        'test_dataset': data_orig_test,
+        'privileged_groups': privileged_groups,
+        'unprivileged_groups': unprivileged_groups
+    }
+    return data
 
 
 class ACSIncomeFolktablesDataset(StandardDataset):

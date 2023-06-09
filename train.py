@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import csv
 import torch
 import argparse
 
@@ -13,7 +12,7 @@ from smac.intensifier.hyperband import Hyperband
 from ConfigSpace import Configuration
 
 from utils import plot_pareto, get_fairness_obj, log_fairness_metrics
-from dataloaders import get_adult_dataloaders
+from dataloaders import get_adult_dataloaders, get_compas_dataloaders, get_acsincome_dataloaders
 from fttransformer_nas import FTTransformerSearch
 
 
@@ -53,7 +52,9 @@ args = parser.parse_args()
 #! TODO: Write a new dataloader for the adult dataset. This one drops a lot of columns!
 
 DATA_FN_MAP = {
-    'adult': get_adult_dataloaders
+    'adult': get_adult_dataloaders,
+    'compas': get_compas_dataloaders,
+    'acs-income': get_acsincome_dataloaders
 }
 
 if __name__ == "__main__":
