@@ -1,10 +1,9 @@
-from __future__ import annotations
-
 import rtdl
 import torch
 import torch.nn.functional as F
 
-from utils import train, test, get_fairness_metrics, get_fairness_obj, print_all_metrics
+from utils import train, test, get_fairness_metrics, print_all_metrics
+from .nas import NAS
 
 from ConfigSpace import (
     Categorical,
@@ -19,19 +18,9 @@ from ConfigSpace import (
 )
 
 
-class FTTransformerSearch:
+class FTTransformerSearch(NAS):
     def __init__(self, args, data_fn, fairness_metric=None) -> None:
-        self.args = args
-        self.data_fn = data_fn
-        self.fairness_metric = fairness_metric
-        self.fairness_obj_name = self.fairness_metric + "_obj"
-
-    @property
-    def get_objectives(self)-> list[str]:
-        if self.fairness_metric is not None:
-            return ["rev_acc", self.fairness_obj_name] # both need to be minimized
-        else:
-            return ["rev_acc"]
+        super(FTTransformerSearch, self).__init__(args, data_fn, fairness_metric)
 
     @property
     def configspace(self) -> ConfigurationSpace:
@@ -213,13 +202,3 @@ class FTTransformerSearch:
             print("#"*30)
 
         return train_acc, val_acc, test_acc, val_class_metric, test_class_metric
-
-
-    def train(self, config: Configuration, seed: int = 0, budget: int = 25) -> float:
-        _, val_acc, test_acc, val_class_metric, test_class_metric = \
-                self.create_and_train_model_from_config(config, budget) # fm = fairness metric
-        val_fobj = get_fairness_obj(val_class_metric, self.fairness_metric)
-        objectives = {'rev_acc': 1 - val_acc}
-        if self.fairness_metric is not None:
-            objectives[self.fairness_obj_name] = val_fobj
-        return objectives

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import os
 import torch
 import argparse
@@ -13,7 +11,7 @@ from ConfigSpace import Configuration
 
 from utils import plot_pareto, get_fairness_obj, log_fairness_metrics
 from dataloaders import get_adult_dataloaders, get_compas_dataloaders, get_acsincome_dataloaders
-from fttransformer_nas import FTTransformerSearch
+from models import FTTransformerSearch, ResNetSearch
 
 
 parser = argparse.ArgumentParser()
@@ -21,7 +19,9 @@ parser.add_argument('--dataset', type=str, default='adult')
 parser.add_argument('--privilege_mode', type=str, default='sex')
 parser.add_argument('--train_bs', type=int, default=64)
 parser.add_argument('--test_bs', type=int, default=64)
-parser.add_argument('--model', type=str, default='FTTransformer')
+parser.add_argument('--model', type=str, default='FTTransformer',
+                    choices=['FTTransformer', 'ResNet'],
+                    help="which model to use for NAS"),
 parser.add_argument('--multi_objective', action='store_true',
                     help="whether to use multi-objective optimization \
                         -> joint optimization of both accuracy and fairness")
@@ -64,6 +64,10 @@ if __name__ == "__main__":
         model_search = FTTransformerSearch(args, DATA_FN_MAP[args.dataset],
                                            fairness_metric=args.fairness_metric if \
                                                            args.multi_objective else None)
+    elif args.model == 'ResNet':
+        model_search = ResNetSearch(args, DATA_FN_MAP[args.dataset],
+                                    fairness_metric=args.fairness_metric if \
+                                                    args.multi_objective else None)
 
     print('Running NAS on %d GPUs'%torch.cuda.device_count())
     
@@ -103,7 +107,7 @@ if __name__ == "__main__":
 
     default_config = model_search.configspace.get_default_configuration()
     train_acc, val_acc, test_acc, val_class_metric, test_class_metric =\
-        model_search.create_and_train_model_from_config_new(config=default_config, budget=args.eval_budget)
+        model_search.create_and_train_model_from_config(config=default_config, budget=args.eval_budget)
     print(f"\nDefault train score: {train_acc}")
     print(f"Default val score: {val_acc}")
     print(f"Default test score: {test_acc}")
@@ -117,7 +121,7 @@ if __name__ == "__main__":
     for idx, incumbent in enumerate(incumbents):
         print(f"\nIncumbent {idx}")
         train_acc, val_acc, test_acc, val_class_metric, test_class_metric =\
-            model_search.create_and_train_model_from_config_new(config=incumbent, budget=args.eval_budget)
+            model_search.create_and_train_model_from_config(config=incumbent, budget=args.eval_budget)
         print(f"\nIncumbent {idx}")
         print(f"\nIncumbent train score: {train_acc}")
         print(f"Incumbent val score: {val_acc}")
