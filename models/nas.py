@@ -1,9 +1,12 @@
+import os
+import json
+
 from ConfigSpace import (
     Configuration,
     ConfigurationSpace
 )
 
-from utils import get_fairness_obj
+from utils import get_fairness_obj, log_fairness_metrics
 
 class NAS:
     def __init__(self, args, data_fn, fairness_metric=None) -> None:
@@ -30,4 +33,14 @@ class NAS:
         objectives = {'rev_acc': 1 - val_acc}
         if self.fairness_metric is not None:
             objectives[self.fairness_obj_name] = val_fobj
+
+        with open(os.path.join(self.args.output_dir, self.args.run_name, str(self.args.seed), 'stats.csv'), 'a') as f:
+            f.write(','.join(str(x) for x in log_fairness_metrics(val_class_metric)) + '\n')
+        
+        with open(os.path.join(self.args.output_dir, self.args.run_name, str(self.args.seed), 'stats.json'), 'r') as f:
+            existing = json.load(f)
+        existing["data"].append(log_fairness_metrics(val_class_metric, asdict=True))
+        with open(os.path.join(self.args.output_dir, self.args.run_name, str(self.args.seed), 'stats.json'), 'w') as f:
+            json.dump(existing, f)
+
         return objectives

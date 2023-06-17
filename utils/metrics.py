@@ -25,17 +25,26 @@ def print_all_metrics(classification_metric):
     print("Average Absolute Odds Difference = {}".format(classification_metric.average_abs_odds_difference()))
     print("Equal Opportunity Difference = {}".format(classification_metric.equal_opportunity_difference()))        
 
-def log_fairness_metrics(classification_metric):
+def log_fairness_metrics(classification_metric, asdict=False):
     TPR = classification_metric.true_positive_rate()
     TNR = classification_metric.true_negative_rate()
     bal_acc_debiasing_test = 0.5*(TPR+TNR)
-    return (classification_metric.accuracy(),
-           bal_acc_debiasing_test,
-           classification_metric.statistical_parity_difference(),
-           classification_metric.disparate_impact(),
-           classification_metric.equal_opportunity_difference(),
-           classification_metric.average_odds_difference(),
-           classification_metric.theil_index())
+    if asdict:
+        return {'accuracy': classification_metric.accuracy(),
+                'bal_acc': bal_acc_debiasing_test,
+                'statistical_parity_difference': classification_metric.statistical_parity_difference(),
+                'disparate_impact': classification_metric.disparate_impact(),
+                'equal_opportunity_difference': classification_metric.equal_opportunity_difference(),
+                'average_odds_difference': classification_metric.average_odds_difference(),
+                'theil_index': classification_metric.theil_index()}
+    else:
+        return (classification_metric.accuracy(),
+                bal_acc_debiasing_test,
+                classification_metric.statistical_parity_difference(),
+                classification_metric.disparate_impact(),
+                classification_metric.equal_opportunity_difference(),
+                classification_metric.average_odds_difference(),
+                classification_metric.theil_index())
 
 def get_fairness_obj(classification_metric, metric_name):
     if metric_name == 'disparate_impact':

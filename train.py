@@ -1,4 +1,5 @@
 import os
+import json
 import torch
 import argparse
 
@@ -99,9 +100,17 @@ if __name__ == "__main__":
         overwrite=False,
     )
 
+    # Init log files if they don't exist
+    if not os.path.exists(os.path.join(args.output_dir, args.run_name, str(args.seed), 'stats.csv')):
+        with open(os.path.join(args.output_dir, args.run_name, str(args.seed), 'stats.csv'), 'w') as f:
+            f.write("Classification accuracy, Balanced classification accuracy, Mean Difference, Disparate impact, Equal opportunity difference, Average odds difference, Theil_index\n")
+        with open(os.path.join(args.output_dir, args.run_name, str(args.seed), 'stats.json'), 'w') as f:
+            json.dump({"data": []}, f)
+
     incumbents = smac.optimize()
     if isinstance(incumbents, Configuration):
         incumbents = [incumbents]
+  
     print("\nBest found configurations: %s" % (incumbents))
     print("Found: ", len(incumbents), " configurations on the pareto front!")
 
