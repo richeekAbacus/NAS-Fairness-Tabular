@@ -11,7 +11,7 @@ parser = argparse.ArgumentParser(description='Monitor SMAC runs and kill if they
 parser.add_argument('--run_name', type=str, default='test',
                     help='Name of the run to monitor')
 parser.add_argument('--model', type=str, default='FTTransformer',
-                    choices=['FTTransformer', 'ResNet'],
+                    choices=['FTTransformer', 'ResNet', 'MLP'],
                     help="which model to use for NAS")
 parser.add_argument('--dataset', type=str, default='adult',
                     help='Dataset to run method')

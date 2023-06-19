@@ -12,7 +12,7 @@ from ConfigSpace import Configuration
 
 from utils import plot_pareto, get_fairness_obj, log_fairness_metrics
 from dataloaders import get_adult_dataloaders, get_compas_dataloaders, get_acsincome_dataloaders
-from models import FTTransformerSearch, ResNetSearch
+from models import FTTransformerSearch, ResNetSearch, MLPSearch
 
 
 parser = argparse.ArgumentParser()
@@ -21,7 +21,7 @@ parser.add_argument('--privilege_mode', type=str, default='sex')
 parser.add_argument('--train_bs', type=int, default=64)
 parser.add_argument('--test_bs', type=int, default=64)
 parser.add_argument('--model', type=str, default='FTTransformer',
-                    choices=['FTTransformer', 'ResNet'],
+                    choices=['FTTransformer', 'ResNet', 'MLP'],
                     help="which model to use for NAS"),
 parser.add_argument('--multi_objective', action='store_true',
                     help="whether to use multi-objective optimization \
@@ -69,6 +69,10 @@ if __name__ == "__main__":
         model_search = ResNetSearch(args, DATA_FN_MAP[args.dataset],
                                     fairness_metric=args.fairness_metric if \
                                                     args.multi_objective else None)
+    elif args.model == 'MLP':
+        model_search = MLPSearch(args, DATA_FN_MAP[args.dataset],
+                                 fairness_metric=args.fairness_metric if \
+                                                 args.multi_objective else None)
 
     print('Running NAS on %d GPUs'%torch.cuda.device_count())
     
