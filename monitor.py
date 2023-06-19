@@ -13,6 +13,8 @@ parser.add_argument('--run_name', type=str, default='test',
 parser.add_argument('--model', type=str, default='FTTransformer',
                     choices=['FTTransformer', 'ResNet', 'MLP'],
                     help="which model to use for NAS")
+parser.add_argument('--weighting', type=int, default=1,
+                    help="amount of weighting to apply to fairness metric: 1 is no-weighting -> uses ParEgo")
 parser.add_argument('--dataset', type=str, default='adult',
                     help='Dataset to run method')
 parser.add_argument('--privilege_mode', type=str, default='sex',
@@ -36,6 +38,7 @@ SMAC_RUN = ['python3', 'train.py',
     '--test_bs', '64',
     '--model', args.model,
     '--multi_objective',
+    '--weighting', str(args.weighting),
     '--fairness_metric', args.fairness_metric,
     '--run_name', run_name,
     '--output_dir', 'results/',

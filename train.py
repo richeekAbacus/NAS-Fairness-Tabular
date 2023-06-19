@@ -26,6 +26,8 @@ parser.add_argument('--model', type=str, default='FTTransformer',
 parser.add_argument('--multi_objective', action='store_true',
                     help="whether to use multi-objective optimization \
                         -> joint optimization of both accuracy and fairness")
+parser.add_argument('--weighting', type=int, default=1,
+                    help="amount of weighting to apply to fairness metric: 1 is no-weighting -> uses ParEgo")
 parser.add_argument('--fairness_metric', type=str, default='statistical_parity_difference',
                     choices=['statistical_parity_difference',
                              'disparate_impact',
@@ -93,7 +95,13 @@ if __name__ == "__main__":
     initial_design = MFFacade.get_initial_design(scenario, n_configs=args.initial_n_configs)
     intensifier = Hyperband(scenario, eta=args.successive_halving_eta,
                             incumbent_selection="highest_budget") # SuccessiveHalving can be used
-    multi_objective_algorithm = ParEGO(scenario)
+    
+    if args.weighting == 1:
+        multi_objective_algorithm = ParEGO(scenario)
+    else:
+        assert args.weighting > 1
+        print("Using weighted multi-objective optimization with weighting %d"%args.weighting)
+        multi_objective_algorithm = MFFacade.get_multi_objective_algorithm(scenario, objective_weights=[1, args.weighting])
 
     smac = MFFacade(
         scenario,
