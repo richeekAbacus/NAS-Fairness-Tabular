@@ -30,7 +30,8 @@ class NAS:
         _, val_acc, _, val_class_metric, _ = \
                 self.create_and_train_model_from_config(config, budget) # fm = fairness metric
         val_fobj = get_fairness_obj(val_class_metric, self.fairness_metric)
-        objectives = {'rev_acc': 1 - val_acc}
+        # objectives = {'rev_acc': 1 - val_acc} # replace with balanced classification accuracy and check
+        objectives = {'rev_acc': get_fairness_obj(val_class_metric, 'balanced_class_acc')}
         if self.fairness_metric is not None:
             objectives[self.fairness_obj_name] = val_fobj
 

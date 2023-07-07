@@ -93,7 +93,7 @@ def plot_SMAC_pareto(metric='statistical_parity_difference'):
     costs_x, costs_y = data_points[:, 0], data_points[:, 1]
     pareto_costs_x, pareto_costs_y = pareto_set[:, 0], pareto_set[:, 1]
 
-    plt.scatter(costs_x, costs_y, marker="x", label="Search space")
+    # plt.scatter(costs_x, costs_y, marker="x", label="Search space")
     plt.scatter(pareto_costs_x, pareto_costs_y, marker="x", c='r', label="NAS Pareto front")
     plt.step(
         [pareto_costs_x[0]] + pareto_costs_x.tolist() + [np.max(costs_x)],  # We add bounds
@@ -136,7 +136,7 @@ def main():
         plt.xlabel("1 - Accuracy")
         plt.ylabel(f"Fairness (Objective {MAP_NAMES[metric]})")
         plt.legend(loc='upper right', bbox_to_anchor=(1.2, 1.0))
-        plt.savefig(f"pareto_front_{metric}.png", dpi=600, bbox_inches='tight')
+        plt.savefig(os.path.join(args.rundir, f"pareto_front_{metric}.png"), dpi=600, bbox_inches='tight')
 
 
 if __name__ == '__main__':

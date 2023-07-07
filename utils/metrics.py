@@ -57,5 +57,9 @@ def get_fairness_obj(classification_metric, metric_name):
         return abs(classification_metric.average_abs_odds_difference())
     elif metric_name == 'equal_opportunity_difference':
         return abs(classification_metric.equal_opportunity_difference())
+    elif metric_name == 'balanced_class_acc':
+        TPR = classification_metric.true_positive_rate()
+        TNR = classification_metric.true_negative_rate()
+        return 1 - 0.5*(TPR+TNR)
     else:
         raise NotImplementedError
