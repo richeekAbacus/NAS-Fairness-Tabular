@@ -8,11 +8,15 @@ import argparse
 import subprocess
 
 parser = argparse.ArgumentParser(description='Monitor SMAC runs and kill if they exceed the number of consecutive config runs')
-parser.add_argument('--run_name', type=str, default='test',
+parser.add_argument('--run_name', type=str, default='None',
                     help='Name of the run to monitor')
 parser.add_argument('--model', type=str, default='FTTransformer',
-                    choices=['FTTransformer', 'ResNet', 'MLP'],
+                    choices=['FTTransformer', 'ResNet', 'MLP',
+                             'ResNetPre', 'FTTransformerPre',
+                             'ResNetPost', 'FTTransformerPost'],
                     help="which model to use for NAS")
+parser.add_argument('--prepost', type=str, default="None",
+                    help="Pre/Post-processing technique to use if such a `model` is chosen")
 parser.add_argument('--weighting', type=int, default=1,
                     help="amount of weighting to apply to fairness metric: 1 is no-weighting -> uses ParEgo")
 parser.add_argument('--dataset', type=str, default='adult',
@@ -27,7 +31,10 @@ args = parser.parse_args()
 
 SEED = 42
 N_TRIALS = 200
-run_name = args.run_name
+if args.run_name == 'None':
+    run_name = f"{args.dataset}_{args.privilege_mode}_{args.model}_{args.prepost}_{args.fairness_metric}"
+else:
+    run_name = args.run_name
 run_path = f'results/{run_name}/{SEED}/'
 
 # Define the SMAC Run with all the arguments
@@ -37,6 +44,7 @@ SMAC_RUN = ['python3', 'train.py',
     '--train_bs', '64',
     '--test_bs', '64',
     '--model', args.model,
+    '--prepost', args.prepost,
     '--multi_objective',
     '--weighting', str(args.weighting),
     '--fairness_metric', args.fairness_metric,

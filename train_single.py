@@ -96,7 +96,7 @@ if __name__ == "__main__":
     
     smac = MFFacade(
         scenario,
-        lambda config, seed, budget: model_search.train(config, seed, budget)[args.fairness_metric + "_obj"],
+        lambda config, seed, budget: model_search.train(config, seed, budget)["rev_acc"],
         initial_design=initial_design,
         intensifier=intensifier,
         overwrite=False,
