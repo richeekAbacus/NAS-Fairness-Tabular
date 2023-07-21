@@ -12,7 +12,9 @@ from ConfigSpace import Configuration
 
 from utils import plot_pareto, get_fairness_obj, log_fairness_metrics
 from dataloaders import get_adult_dataloaders, get_compas_dataloaders, get_acsincome_dataloaders
-from models import FTTransformerSearch, ResNetSearch, MLPSearch
+from models import (FTTransformerSearch, ResNetSearch, MLPSearch,
+                    ResNetPreSearch, FTTransformerPreSearch,
+                    ResNetPostSearch, FTTransformerPostSearch)
 
 
 parser = argparse.ArgumentParser()
@@ -21,11 +23,20 @@ parser.add_argument('--privilege_mode', type=str, default='sex')
 parser.add_argument('--train_bs', type=int, default=64)
 parser.add_argument('--test_bs', type=int, default=64)
 parser.add_argument('--model', type=str, default='FTTransformer',
-                    choices=['FTTransformer', 'ResNet', 'MLP'],
+                    choices=['FTTransformer', 'ResNet', 'MLP',
+                             'ResNetPre', 'FTTransformerPre',
+                             'ResNetPost', 'FTTransformerPost'],
                     help="which model to use for NAS"),
+parser.add_argument('--prepost', type=str, default="None",
+                    help="Pre/Post-processing technique to use if such a `model` is chosen")
 parser.add_argument('--multi_objective', action='store_true',
                     help="whether to use multi-objective optimization \
                         -> joint optimization of both accuracy and fairness")
+parser.add_argument('--target', type=str, default='rev_acc',
+                    choices=['rev_acc', 'fairness'],
+                    help="which metric to use as the target for optimization")
+parser.add_argument('--weighting', type=int, default=1,
+                    help="amount of weighting to apply to fairness metric: 1 is no-weighting -> uses ParEgo")
 parser.add_argument('--fairness_metric', type=str, default='statistical_parity_difference',
                     choices=['statistical_parity_difference',
                              'disparate_impact',
@@ -73,6 +84,28 @@ if __name__ == "__main__":
         model_search = MLPSearch(args, DATA_FN_MAP[args.dataset],
                                  fairness_metric=args.fairness_metric if \
                                                  args.multi_objective else None)
+    elif args.model == "ResNetPre":
+        model_search = ResNetPreSearch(args, DATA_FN_MAP[args.dataset],
+                                       fairness_metric=args.fairness_metric if \
+                                                       args.multi_objective else None,
+                                       preprocessing_method=args.prepost)
+    elif args.model == "FTTransformerPre":
+        model_search = FTTransformerPreSearch(args, DATA_FN_MAP[args.dataset],
+                                              fairness_metric=args.fairness_metric if \
+                                                              args.multi_objective else None,
+                                              preprocessing_method=args.prepost)
+    elif args.model == "ResNetPost":
+        model_search = ResNetPostSearch(args, DATA_FN_MAP[args.dataset],
+                                        fairness_metric=args.fairness_metric if \
+                                                        args.multi_objective else None,
+                                        postprocessing_method=args.prepost)
+    elif args.model == "FTTransformerPost":
+        model_search = FTTransformerPostSearch(args, DATA_FN_MAP[args.dataset],
+                                               fairness_metric=args.fairness_metric if \
+                                                               args.multi_objective else None,
+                                               postprocessing_method=args.prepost)
+    else:
+        raise ValueError("Model not recognized!")
 
     print('Running NAS on %d GPUs'%torch.cuda.device_count())
     
@@ -94,9 +127,18 @@ if __name__ == "__main__":
     intensifier = Hyperband(scenario, eta=args.successive_halving_eta,
                             incumbent_selection="highest_budget") # SuccessiveHalving can be used
     
+    if args.weighting == 1:
+        multi_objective_algorithm = ParEGO(scenario)
+    else:
+        assert args.weighting > 1
+        print("Using weighted multi-objective optimization with weighting %d"%args.weighting)
+        multi_objective_algorithm = MFFacade.get_multi_objective_algorithm(scenario, objective_weights=[1, args.weighting])
+
+    optimvar = args.target if args.target == 'rev_acc' else args.target + '_obj' 
+
     smac = MFFacade(
         scenario,
-        lambda config, seed, budget: model_search.train(config, seed, budget)["rev_acc"],
+        lambda config, seed, budget: model_search.train(config, seed, budget)[optimvar],
         initial_design=initial_design,
         intensifier=intensifier,
         overwrite=False,
