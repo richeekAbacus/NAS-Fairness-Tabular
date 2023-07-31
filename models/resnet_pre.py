@@ -4,9 +4,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from .nas import NAS
+from .nas import NAS, budget_trainer
 from dataloaders import get_dataloaders
-from utils import train, test, get_fairness_metrics, print_all_metrics
 
 from ConfigSpace import (
     Categorical,
@@ -97,42 +96,7 @@ class ResNetPreSearch(NAS):
         else:
             raise NotImplementedError
 
-        for epoch in range(int(budget)):
-            train(model, optimizer, train_loader, loss_fn, epoch, 100)
-
-            loss, train_acc, _, _ = test(model, train_loader, loss_fn, epoch)
-            print('Epoch: {}, Train Loss: {}, Train Accuracy: {}'.format(epoch, loss, train_acc))
-
-            # validation metrics ##########################################################
-            print("#"*30)
-            loss, val_acc, pred_y_val, scores_y_val = test(model, val_loader, loss_fn, epoch)
-            print('Epoch: {}, Val Loss: {}, Val Accuracy: {}'.format(epoch, loss, val_acc))
-
-            val_data_metric, val_class_metric = get_fairness_metrics(val_repd, 
-                                                                     pred_y_val,
-                                                                     scores_y_val,
-                                                                     data_dict['unprivileged_groups'],
-                                                                     data_dict['privileged_groups'])
-            print("Val set: Difference in mean outcomes between unprivileged and privileged groups = {}".\
-                  format(val_data_metric.mean_difference()))
-            print("VALIDATION SET METRICS: ")
-            print_all_metrics(val_class_metric)
-            print("#"*30)
-
-            # test metrics ################################################################
-            print("#"*30)
-            loss, test_acc, pred_y_test, scores_y_test = test(model, test_loader, loss_fn, epoch)
-            print('Epoch: {}, Test Loss: {}, Test Accuracy: {}'.format(epoch, loss, test_acc))
-
-            test_data_metric, test_class_metric = get_fairness_metrics(test_repd,
-                                                                       pred_y_test,
-                                                                       scores_y_test,
-                                                                       data_dict['unprivileged_groups'],
-                                                                       data_dict['privileged_groups'])
-            print("Test set: Difference in mean outcomes between unprivileged and privileged groups = {}".\
-                  format(test_data_metric.mean_difference()))
-            print("TEST SET METRICS: ")
-            print_all_metrics(test_class_metric)
-            print("#"*30)
+        train_acc, val_acc, test_acc, val_class_metric, test_class_metric = \
+            budget_trainer(self.args, model, optimizer, data_dict, loss_fn, budget)
 
         return train_acc, val_acc, test_acc, val_class_metric, test_class_metric

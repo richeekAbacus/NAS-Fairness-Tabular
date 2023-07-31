@@ -10,6 +10,8 @@ data/
 results/
 results copy/
 logs/
+checkpoints/
+results*/
 
 # Distribution / packaging
 .Python
