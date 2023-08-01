@@ -96,6 +96,10 @@ class ResNetPreSearch(NAS):
         else:
             raise NotImplementedError
 
+        data_dict['train_loader'] = train_loader
+        data_dict['val_loader'] = val_loader
+        data_dict['test_loader'] = test_loader
+
         train_acc, val_acc, test_acc, val_class_metric, test_class_metric = \
             budget_trainer(self.args, model, optimizer, data_dict, loss_fn, budget)
 
