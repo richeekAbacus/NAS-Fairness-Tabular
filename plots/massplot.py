@@ -9,4 +9,4 @@ for folder_path in glob.glob("../results/*"):
            "--privilege_mode", privilege_mode,
            "--rundir", folder_path + "/42/",]
     subprocess.Popen(CMD)
-    print("GENERATED PLOST FOR: ", foldername)
+    print("GENERATED PLOTS FOR: ", foldername)
